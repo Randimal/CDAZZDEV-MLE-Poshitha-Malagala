@@ -68,6 +68,23 @@ class AgentAction(Model):
         return self
 
 
+class ResearchDecision(Model):
+    """Single-agent planner chooses evidence or readiness, never writes a report."""
+
+    kind: Literal["tool", "finish"]
+    reason: str = Field(min_length=1, max_length=500)
+    tool_name: str | None = None
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def check_action(self) -> "ResearchDecision":
+        if self.kind == "tool" and not self.tool_name:
+            raise ValueError("Tool action needs a name")
+        if self.kind == "finish" and (self.tool_name or self.arguments):
+            raise ValueError("Finish signals readiness without tool arguments")
+        return self
+
+
 class ToolObservation(Model):
     evidence_id: str
     role: Role

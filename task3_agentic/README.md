@@ -9,6 +9,8 @@ Answer the assessment's current financial-health/market-sentiment question with 
 | `schemas.py` / `state.py` | Pydantic decisions, evidence-linked metrics, reports and handoffs; TypedDict graph state |
 | `tools.py` | Five callable implementations, shared Task 1 services, argument validation and enforced role permissions |
 | `runtime.py` | Shared bounded LangGraph decision/tool/observation loop and evidence validation |
+| `synthesis.py` | Single-agent final synthesis with a compact digest, local validation and one targeted repair |
+| `demonstrations.py` | Opt-in, one-failure executor for the labelled notebook replan demonstration |
 | `single_agent.py` | Single researcher with persistent cache guard |
 | `multi_agent.py` | Mandatory analyst/review/clarification/writer graph |
 | `prompts.py` | Separate agent, tool-description and follow-up instructions |
@@ -16,21 +18,24 @@ Answer the assessment's current financial-health/market-sentiment question with 
 | `tracing.py` | Redacted full session events and truncated tool JSONL logging |
 | `task3_agentic.ipynb` | Executable Colab demonstrations, initially without outputs |
 
-The application uses LangGraph `StateGraph` directly. Groq returns a validated action containing a concise decision rationale and either a tool name/arguments or a structured finish output. The existing Task 1 CompletionClient, JSON/fenced-JSON parser, Groq environment configuration and SDK are reused; a second provider client is unnecessary.
+The application uses LangGraph `StateGraph` directly. The single research planner returns a Pydantic ResearchDecision with a concise rationale and either tool arguments or a readiness signal; it never writes a report. A separate final_synthesis node produces and validates ResearchReport. The multi-agent stages retain their existing AgentAction and typed stage-output contracts. The existing frozen Task 1 CompletionClient, safe JSON/fenced-JSON parser and Groq configuration/SDK are reused.
 
 ```mermaid
 flowchart LR
   Decide -->|LLM selects tool| Tool
   Tool --> Observe
   Observe -->|result or failure| Decide
-  Decide -->|LLM selects finish| Validate
-  Validate -->|invalid or unsupported| Decide
-  Validate -->|valid| End
+  Decide -->|LLM signals readiness| Coverage
+  Coverage -->|missing quantitative or qualitative evidence| Decide
+  Coverage -->|sufficient| FinalSynthesis
+  FinalSynthesis -->|valid report or controlled failure| End
 ```
 
 ## Autonomous selection and observe/replan
 
-No tool order is encoded in graph edges. Each decision sees allowed tool schemas, successful/failed observations, available verified headlines, structured handoffs, evidence IDs and remaining budget. Failed tool name/arguments are normalized (defaults, ticker case and JSON ordering) in state; identical failed calls are blocked before dispatch. Changed arguments or another source remain allowed. Invalid JSON/actions/final outputs replan instead of fabricating results. Each stage has a default budget of 12 planning responses (configurable 1–30). Groq retries transient errors internally with bounded 1/2/4-second backoff and Retry-After; deterministic provider errors stop immediately. Exhausted transport stops with a safe category without consuming planning steps. Injected legacy clients have a separate two-failure bound with a pause. SDK retries remain disabled to prevent nested retries. Budget exhaustion returns `report=None` with an explicit error.
+No tool order is encoded in graph edges. Each decision sees allowed tool schemas, successful/failed observations, available verified headlines, structured handoffs, evidence IDs and remaining budget. Failed tool name/arguments are normalized (defaults, ticker case and JSON ordering) in state; identical failed calls are blocked before dispatch. Changed arguments or another source remain allowed. Invalid planning actions or premature readiness replan; the multi-agent stage contracts retain bounded output correction. Each stage has a default budget of 12 planning responses (configurable 1–30). Groq retries transient errors internally with bounded 1/2/4-second backoff and Retry-After, independent of planning steps. Injected legacy clients have a separate two-failure bound with a pause. SDK retries remain disabled to prevent nested retries. Budget exhaustion returns `report=None` with an explicit error.
+
+For the single researcher, readiness passes the coverage guard to a separate LangGraph `final_synthesis` node. It receives summary/latest indicators, compact news/search/sentiment evidence and preserved IDs; the full report schema is sent here, not in each planner request. One LLM-generated report is parsed safely and validated with Pydantic plus the existing evidence/language checks. Parse/schema/grounding failures get at most ONE targeted repair using the same evidence. This node cannot dispatch tools or return to planning. Groq JSON-object mode stays first; only a provider `json_validate_failed` rejection permits the repair in text mode requesting JSON, with the same mandatory local validation. Other exhausted transport errors stop. No fallback report is fabricated.
 
 Reports require successful price/volatility evidence AND news/search evidence, as well as a quantitative hedge reference. The writer's validated analyst handoff supplies quantitative coverage. Sentiment alone does not replace a news/search observation. Coverage status is supplied to the planner. These are evidence-coverage checks, not a fixed sequence. The three risks must cite known successful observations or permitted handoff IDs. Numeric handoff fields must exactly match retrieved values and canonical paths. Structural/reference checks cannot verify all qualitative LLM claims.
 
@@ -65,8 +70,8 @@ Permissions are enforced before tool lookup or cache access, not only in prompts
 Every uncached multi-agent run executes:
 
 1. A autonomously gathers allowed evidence and produces a Pydantic QuantitativeBrief.
-2. B receives validated structured fields, reviews the brief and can gather news/search.
-3. B produces one ClarificationRequest: a specific question, one requested metric and a reason.
+2. B receives the Pydantic QuantitativeBrief (the DataBrief), reviews it and gathers news/search.
+3. B produces one ClarificationRequest: a specific question, one missing requested metric and a material reason. Code rejects a request for an already supplied non-null brief metric or one made before qualitative research. The prompt encourages sentiment analysis of B's actual retrieved headlines when useful and missing; it does not fix the metric or question wording. Only A has llm_sentiment, so this is a complementary handoff rather than redundant data access.
 4. A receives the typed request plus previous state, selects allowed tools or existing evidence, and returns a ClarificationResponse for the exact question/metric. Unavailable data is acknowledged.
 5. B receives both handoffs and validates against WriterResearchReport: clarification_used is a required non-null/non-empty string copied verbatim from A's answer. Available quantitative clarification must also be cited in the final analysis. Citations alone cannot replace the required field. A field-specific safe rejection feeds the next planner response, with at most three failed writer finish attempts and no transport retry for output validation. Accepted reports use the canonical ResearchReport model for stable cache round trips.
 
@@ -76,9 +81,9 @@ The stage order is fixed because the critique is mandatory. Tool order inside ea
 
 Live state retains observations, reports and typed handoffs. `answer_followup(run, question, client)` has no reachable tool executor: it asks the LLM to answer from memory only and validates references. It may make an LLM call but cannot refetch Yahoo/volatility/search. The notebook asserts unchanged tool counters and JSONL byte size.
 
-Full price history remains in session state; planner context contains zero OHLCV rows, retaining summary, latest indicators, row count, date and price basis. News context retains title/publisher/date, search snippets are capped at 400 characters, sentiment context retains its aggregate, and full source URLs/provider output remain in live observations. The sentiment title registry omits duplicated metadata and is supplied only to roles allowed sentiment. Persisted observations use the same compact view. Evidence IDs and canonical numeric paths are preserved. Questions outside supplied memory must be treated as unavailable.
+Full price history remains in session state; planner context contains zero OHLCV rows, retaining summary, latest indicators, row count, date and price basis. News context retains title/publisher/date, search snippets are capped at 400 characters with source hosts, sentiment context retains its aggregate, and full source URLs/provider output remain in live observations. The sentiment title registry omits duplicated metadata and is supplied only to roles allowed sentiment. Persisted observations use the same compact view. Evidence IDs and canonical numeric paths are preserved. Questions outside supplied memory must be treated as unavailable.
 
-Planner JSON uses compact separators. Schema presentation titles/descriptions/defaults are removed while field names, required lists, references, enums and bounds remain. Required contracts are still supplied on each stateless CompletionClient call; omitting them on later calls would assume conversation memory that this interface does not provide. Traces expose prompt_chars as a size diagnostic, not a measured token count. Provider failures expose only safe category, HTTP status and allowlisted error codes; raw response bodies and credentials are excluded.
+Planner JSON uses compact separators. Schema presentation titles/descriptions/defaults are removed while field names, required lists, references, enums and bounds remain. Action/tool contracts remain supplied on each stateless planning call; single-agent report contracts appear only in synthesis. Multi-agent output contracts remain stage-specific. Traces expose prompt_chars as a size diagnostic, not a measured token count. Provider failures expose only safe category, HTTP status and allowlisted error codes; raw response bodies and credentials are excluded.
 
 The report safeguard conservatively rejects unsupported balance-sheet strength, solvency, cash-flow health or earnings-quality conclusions. Current tools do not retrieve audited accounts, so reports should describe market/technical condition and explicitly state those fundamental assessments are unavailable. This is a small sentence-pattern check, not comprehensive NLP moderation or semantic verification.
 
@@ -97,6 +102,10 @@ ResearchRun.trace retains full sanitized model-facing messages, decisions, obser
 Redaction removes secret-named fields, configured secret values, bearer credentials and common token patterns from traces/context/cache. Raw provider exception bodies are not retained by Task 3. API keys use existing SDK environment configuration. `.env`, temporary logs and memory are ignored; the required `logs/agent_trace.jsonl` is intentionally committed. TLS verification stays enabled. Never put arbitrary credentials in questions or source text: unrecognized opaque secrets cannot be guaranteed identifiable.
 
 ## Running and verification
+
+The notebook includes a clearly labelled **Controlled failure injection for fallback demonstration**. ControlledFailureExecutor temporarily substitutes a failing dependency for the first allowed tool actually selected; the real dispatcher records one failed observation and the LLM decides its next action. It is an opt-in, single-threaded showcase, not a production outage or fixed replacement plan. Its cache directory is separate from the main workflows. Real external failures may also occur; only actual trace/output can establish live recovery.
+
+The permission demo dispatches A→web_search and B→get_price_data, displaying failed PermissionError observations without provider access. Follow-up output explicitly shows tool_calls_before/after and zero difference. A new NoCallsClient session for the second same-day cache run displays cache_hit=True, new_tool_calls=0, new_llm_calls=0. Main first runs use use_cache=False, which is the refresh equivalent, so cached output cannot replace the first-run demonstrations.
 
 Install root requirements using Python 3.11+. Configure GROQ_API_KEY/GROQ_MODEL securely and open task3_agentic.ipynb locally or in Colab. The notebook uses GroqClient(max_completion_tokens=1800); Task 1's default remains 700.
 
@@ -120,6 +129,10 @@ Run `python -m pytest -q` from the root. Tests mock Groq/Yahoo/search while exec
 Validation on 2026-10-07: 105 tests passed, preserving all original 73. Import/compile, Python 3.11 syntax, notebook schema/cell syntax, lint/format and whitespace checks passed. Live search returned five results and its JSONL record was inspected; Yahoo failed TLS verification, and Groq/agent live smoke was skipped due to unavailable key/model settings. Autonomous/critique/memory behavior was exercised with mocks, not claimed as a live LLM result.
 
 Reliability validation (2026-10-07): 128 offline tests passed, including all original 105. The live no-key RSS smoke returned ten recent real NVDA headlines with normal TLS verification. Groq credentials were unavailable locally, so a successful live single/two-agent report remains to be verified in Colab.
+
+Final-quality validation (2026-10-07): **165 tests passed**, preserving all prior 154 tests and adding 11 focused regressions. Existing single-agent mock fixtures now explicitly separate readiness from the subsequent synthesis response. Task 1, shared modules and Task 2 have no changes. Task 3 Ruff lint/format, import/compile/Python 3.11 syntax, notebook schema/cell syntax and Git whitespace checks passed. Changed notebook demonstration cells were executed with mocked services without saving outputs. Live connectivity returned ten real headlines and five search results; Yahoo price history failed local TLS verification, which was not bypassed. Groq settings were unavailable, so no successful live agent/notebook run is claimed.
+
+Use the updated checkout and a fresh Colab runtime. Run code cells **2, 4, 6, 8, 9, 11, 13, 15, 17, 19 and 21** in order (numbers include Markdown cells): setup/configuration, five-tool smoke, single research/trace/report, injected failure, multi-agent critique/report, permissions, follow-up, cache hit, and JSONL sample. All 22 cells can also be run with Run all. Save the real executed notebook and updated sanitized trace for submission; the local notebook has no fabricated execution outputs.
 
 In Colab, use the updated checkout and restart the runtime to avoid stale imports. Load Groq settings through userdata/hidden prompts and run all cells. Inspect the real decision → tool → observation → replan → next-action cycle, A's brief, B's critique and A's response. Then inspect the follow-up/cache assertions and JSONL contents. Saved outputs must come from actual execution; do not claim live agent performance from mocked tests alone. If the safe category is rate_limit, wait for quota reset; invalid_request requires checking model/configuration/input rather than repeated immediate attempts.
 

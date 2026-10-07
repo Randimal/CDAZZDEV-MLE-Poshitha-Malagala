@@ -62,7 +62,7 @@ FUNDAMENTAL_TERMS = re.compile(
     r"balance[- ]sheet|solven(?:cy|t)|cash[- ]flow|earnings[- ]quality", re.I
 )
 FUNDAMENTAL_ASSERTION = re.compile(
-    r"\b(?:is|are|has|shows|remains|solid|strong|healthy|robust|sound|stable|weak|poor|high|low|improving|deteriorating|insolvent|solvent)\b",
+    r"\b(?:is|are|has|shows|remains|solid|strong|healthy|good|robust|sound|stable|weak|poor|high|low|improving|deteriorating|insolvent|solvent)\b",
     re.I,
 )
 
@@ -126,6 +126,18 @@ def validate_report_language(report: ResearchReport, annualized: list[float]) ->
             ):
                 raise GroundingError(
                     "hedge_strategy_recommendation: optimal strike/cost cannot be established without option-chain/implied-volatility data; give a hedge concept with execution limitations"
+                )
+            option_valuation = re.search(
+                r"\b(?:implied volatility\s+(?:is\s+)?(?:cheap|expensive)|"
+                r"(?:option\s+)?premium\s+(?:is\s+)?attractive)\b",
+                sentence,
+                re.I,
+            )
+            if option_valuation and not _discloses_unavailability(
+                sentence, option_valuation
+            ):
+                raise GroundingError(
+                    "hedge_strategy_recommendation: premium/implied-volatility valuation requires unavailable option-chain data; state execution limitations"
                 )
     hedge = fields["hedge_strategy_recommendation"]
     patterns = (

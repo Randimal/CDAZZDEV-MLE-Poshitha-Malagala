@@ -50,11 +50,10 @@ def test_force_refresh_executes_workflow(
     )
     # Fresh tool-observation IDs continue across the session.
     responses = single_responses()
-    responses[-1]["output"]["top_three_risks"] = [
-        {**item, "evidence_ids": ["obs-6"]}
-        for item in responses[-1]["output"]["top_three_risks"]
+    responses[-1]["top_three_risks"] = [
+        {**item, "evidence_ids": ["obs-6"]} for item in responses[-1]["top_three_risks"]
     ]
-    responses[-1]["output"]["hedge_strategy_recommendation"]["evidence_ids"] = ["obs-4"]
+    responses[-1]["hedge_strategy_recommendation"]["evidence_ids"] = ["obs-4"]
     refreshed_client = ScriptedClient(responses)
     refreshed = SingleResearchAgent(
         AgentRuntime(refreshed_client, executor), memory
@@ -62,7 +61,7 @@ def test_force_refresh_executes_workflow(
     assert (
         refreshed.report
         and not refreshed.cached
-        and len(refreshed_client.requests) == 4
+        and len(refreshed_client.requests) == 5
     )
 
 

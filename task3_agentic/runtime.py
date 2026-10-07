@@ -18,13 +18,20 @@ from task1_financial.llm import (
     parse_output,
     safe_provider_details,
 )
-from task3_agentic.prompts import AGENT_SYSTEM, TOOL_DESCRIPTIONS
+from task3_agentic.prompts import (
+    AGENT_SYSTEM,
+    CRITIQUE_INSTRUCTIONS,
+    SINGLE_PLANNER_SYSTEM,
+    TOOL_DESCRIPTIONS,
+)
 from task3_agentic.schemas import (
     METRIC_PATHS,
     AgentAction,
+    ClarificationRequest,
     ClarificationResponse,
     QuantitativeBrief,
     QuantMetric,
+    ResearchDecision,
     ResearchReport,
     Role,
     ToolObservation,
@@ -32,6 +39,7 @@ from task3_agentic.schemas import (
     WriterResearchReport,
 )
 from task3_agentic.state import AgentState, compact_schema, observation_view
+from task3_agentic.synthesis import final_synthesis
 from task3_agentic.tools import (
     ARGUMENT_SCHEMAS,
     ROLE_TOOLS,
@@ -112,6 +120,20 @@ def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
             raise GroundingError("ticker: must match research ticker")
         for metric in output.metrics:
             validate_metric(metric, observations)
+    elif isinstance(output, ClarificationRequest):
+        known = {
+            metric["name"]
+            for metric in context["brief"]["metrics"]
+            if metric["value"] is not None
+        }
+        if output.requested_metric in known:
+            raise GroundingError(
+                "requested_metric: already supplied in analyst brief; request one missing quantitative/sentiment analysis"
+            )
+        if not evidence_coverage(state)["qualitative"]:
+            raise GroundingError(
+                "clarification evidence: retrieve news/search before identifying missing analyst analysis"
+            )
     elif isinstance(output, ClarificationResponse):
         request = context["request"]
         if output.question != request["question"]:
@@ -203,6 +225,13 @@ class AgentRuntime:
     ) -> StageResult:
         """The LLM chooses tools or finish; graph edges only enforce the loop."""
         allowed = ROLE_TOOLS[role]
+        separate_synthesis = stage == "single_research"
+        action_schema = ResearchDecision if separate_synthesis else AgentAction
+        system = (
+            SINGLE_PLANNER_SYSTEM
+            if separate_synthesis
+            else AGENT_SYSTEM + CRITIQUE_INSTRUCTIONS
+        )
         if stage == "writer_final":
             output_schema = WriterResearchReport
 
@@ -232,7 +261,7 @@ class AgentRuntime:
                         }
                         for name in sorted(allowed)
                     },
-                    "action_schema": compact_schema(AgentAction.model_json_schema()),
+                    "action_schema": compact_schema(action_schema.model_json_schema()),
                     "finish_output_schema": compact_schema(
                         output_schema.model_json_schema()
                     ),
@@ -263,6 +292,9 @@ class AgentRuntime:
                     "feedback": state["feedback"],
                 }
             )
+            if separate_synthesis:
+                # The report schema is supplied once to synthesis, never to the planner.
+                payload.pop("finish_output_schema")
             user = json.dumps(
                 json_safe(payload),
                 allow_nan=False,
@@ -274,14 +306,14 @@ class AgentRuntime:
                     role,
                     "llm_request",
                     {
-                        "system": AGENT_SYSTEM,
+                        "system": system,
                         "user": payload,
-                        "prompt_chars": len(AGENT_SYSTEM) + len(user),
+                        "prompt_chars": len(system) + len(user),
                     },
                 )
             ]
             try:
-                text = self.client.complete(AGENT_SYSTEM, user)
+                text = self.client.complete(system, user)
             except Exception as exc:
                 category = error_category(exc)
                 trace.append(
@@ -309,7 +341,7 @@ class AgentRuntime:
                 }
             try:
                 trace.append(event(role, "llm_response", {"text": text}))
-                action = parse_output(text, AgentAction)
+                action = parse_output(text, action_schema)
                 trace.append(event(role, "decision", action.model_dump()))
                 if (
                     action.kind == "tool"
@@ -404,6 +436,15 @@ class AgentRuntime:
 
         def finish(state: AgentState) -> dict[str, Any]:
             try:
+                if separate_synthesis:
+                    if not all(evidence_coverage(state).values()):
+                        raise GroundingError(
+                            "evidence coverage: need successful price/volatility AND news/search observations before final_synthesis"
+                        )
+                    return {
+                        "trace": state["trace"]
+                        + [event(role, "research_complete", evidence_coverage(state))]
+                    }
                 output = output_schema.model_validate(redact(state["decision"].output))
                 validate_output(output, state, as_of)
                 if isinstance(output, WriterResearchReport):
@@ -440,6 +481,14 @@ class AgentRuntime:
         graph.add_node("tool", call_tool)
         graph.add_node("observe", observe)
         graph.add_node("finish", finish)
+        if separate_synthesis:
+            graph.add_node(
+                "final_synthesis",
+                lambda state: final_synthesis(
+                    self.client, state, as_of, validate_output
+                ),
+            )
+            graph.add_edge("final_synthesis", END)
         graph.add_edge(START, "decide")
         graph.add_conditional_edges(
             "decide",
@@ -463,9 +512,17 @@ class AgentRuntime:
         graph.add_conditional_edges(
             "finish",
             lambda state: (
-                "stop" if state["output"] is not None or state["error"] else "decide"
+                "stop"
+                if state["output"] is not None or state["error"]
+                else "synthesize"
+                if separate_synthesis and state["feedback"] is None
+                else "decide"
             ),
-            {"stop": END, "decide": "decide"},
+            {
+                "stop": END,
+                "decide": "decide",
+                **({"synthesize": "final_synthesis"} if separate_synthesis else {}),
+            },
         )
         initial: AgentState = {
             "query": redact(query),

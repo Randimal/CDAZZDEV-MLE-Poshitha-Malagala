@@ -6,7 +6,14 @@ from task3_agentic.multi_agent import TwoAgentResearch
 from task3_agentic.runtime import AgentRuntime
 from task3_agentic.schemas import QuantitativeBrief
 from task3_agentic.single_agent import SingleResearchAgent
-from task3_agentic.tests.conftest import AS_OF, ScriptedClient, finish, report, tool
+from task3_agentic.tests.conftest import (
+    AS_OF,
+    ScriptedClient,
+    finish,
+    ready,
+    report,
+    tool,
+)
 from task3_agentic.tools import ToolExecutor
 
 
@@ -15,7 +22,8 @@ def single_responses() -> list[dict]:
         tool("get_price_data", ticker="NVDA", period="2y"),
         tool("get_news", ticker="NVDA", n=10),
         tool("web_search", query="NVDA risk evidence"),
-        finish(report()),
+        ready(),
+        report(),
     ]
 
 
@@ -107,7 +115,8 @@ def test_another_llm_can_choose_different_tool_order(
         [
             tool("web_search", query="NVDA risks"),
             tool("get_price_data", ticker="NVDA"),
-            finish(report(price_id="obs-2", research_id="obs-1")),
+            ready(),
+            report(price_id="obs-2", research_id="obs-1"),
         ]
     )
     run = SingleResearchAgent(
@@ -215,8 +224,7 @@ def test_invalid_handoff_metric_replans(executor: ToolExecutor, tmp_path: Path) 
 def test_invalid_final_evidence_is_not_accepted(
     executor: ToolExecutor, tmp_path: Path
 ) -> None:
-    bad = report(price_id="does-not-exist", research_id="does-not-exist")
-    client = ScriptedClient([finish(bad)] * 2)
+    client = ScriptedClient([ready()] * 2)
     run = SingleResearchAgent(
         AgentRuntime(client, executor, max_decisions=2), PersistentMemory(tmp_path)
     ).run(as_of=AS_OF)
@@ -240,9 +248,10 @@ def test_price_only_report_is_rejected_and_replanned(
     client = ScriptedClient(
         [
             tool("get_price_data", ticker="NVDA"),
-            finish(report(price_id="obs-1", research_id="obs-1")),
+            ready(),
             tool("web_search", query="NVDA market evidence"),
-            finish(report(price_id="obs-1", research_id="obs-2")),
+            ready(),
+            report(price_id="obs-1", research_id="obs-2"),
         ]
     )
     run = SingleResearchAgent(

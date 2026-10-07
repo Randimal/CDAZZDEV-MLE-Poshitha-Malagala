@@ -105,3 +105,14 @@ Purpose: audit existing indicators/news/sentiment/report flow; add deterministic
 Prompt: Refine Task 1 only without redesigning stable modules or touching Tasks 2/3. Preserve indicator formulas, adjusted-price/YTD choices, Groq/Pydantic validation and sentiment aggregation. Derive compact indicator confirmations/conflicts from existing values, include them in the recommendation, demonstrate malformed-output rejection offline and controlled invalid-ticker failure, verify the real Yahoo/RSS news flow and bonus artifacts, and validate the implementation without fabricated notebook results or personal reflections.
 
 All AI-generated code must be reviewed, tested and understood by the candidate before submission.
+
+## Task 3 final quality pass
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose: audit the existing LangGraph workflows; separate single-agent research from bounded final synthesis; refine complementary-agent critique validation; preserve compact evidence/IDs; add explicitly labelled failure and permission demonstrations; focused mocked regressions and notebook/documentation validation.
+
+Prompt: Improve Task 3 only while freezing Task 1 and leaving Task 2 pending. Preserve autonomous tool selection, role restrictions, typed handoffs, tracing and memory. Route evidence-sufficient single-agent research to one locally validated synthesis call with at most one targeted repair, request missing analysis through the mandatory critique loop, demonstrate one injected failure with autonomous replanning and denied role access, and visibly prove follow-up/cache call counts without fabricated notebook outputs or reports.
+
+All AI-generated code must be reviewed, tested and understood by the candidate before submission.

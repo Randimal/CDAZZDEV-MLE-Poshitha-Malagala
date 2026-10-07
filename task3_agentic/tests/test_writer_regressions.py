@@ -13,7 +13,7 @@ from task3_agentic.multi_agent import TwoAgentResearch
 from task3_agentic.runtime import AgentRuntime
 from task3_agentic.schemas import ResearchReport, WriterResearchReport
 from task3_agentic.state import compact_schema, observation_view
-from task3_agentic.tests.conftest import AS_OF, ScriptedClient, finish, report
+from task3_agentic.tests.conftest import AS_OF, ScriptedClient, ready, report
 from task3_agentic.tests.test_workflows import multi_responses
 from task3_agentic.tools import horizon_volatility
 from task3_agentic.validation import GroundingError, validate_report_language
@@ -96,7 +96,7 @@ def test_compact_planner_payload_preserves_full_state_and_ids(executor):
     assert view["evidence_id"] == price.evidence_id and price.output == original
     assert "url" not in observation_view(news)["output"]["headlines"][0]
     client = ScriptedClient(
-        [finish(report(price_id=price.evidence_id, research_id=news.evidence_id))]
+        [ready(), report(price_id=price.evidence_id, research_id=news.evidence_id)]
     )
     result = AgentRuntime(client, executor).run(
         "Research NVDA",

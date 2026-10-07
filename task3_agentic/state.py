@@ -1,10 +1,24 @@
 """LangGraph state and bounded model context views."""
 
 from typing import Any, TypedDict
+from urllib.parse import urlsplit
 
-from task3_agentic.schemas import AgentAction, ToolObservation, TraceEvent
+from task3_agentic.schemas import (
+    AgentAction,
+    ResearchDecision,
+    ToolObservation,
+    TraceEvent,
+)
 
 MAX_SEARCH_CONTEXT_CHARS = 400
+
+
+def _source_host(url: str) -> str | None:
+    """Keep source attribution compact; tolerate malformed provider URLs."""
+    try:
+        return urlsplit(url).hostname
+    except ValueError:
+        return None
 
 
 class AgentState(TypedDict):
@@ -16,7 +30,7 @@ class AgentState(TypedDict):
     transport_failures: int
     failed_calls: list[str]
     output_failures: int
-    decision: AgentAction | None
+    decision: AgentAction | ResearchDecision | None
     observations: list[ToolObservation]
     pending: ToolObservation | None
     trace: list[TraceEvent]
@@ -65,6 +79,7 @@ def observation_view(observation: ToolObservation) -> dict[str, Any]:
                 {
                     "title": item.get("title"),
                     "snippet": item.get("snippet", "")[:MAX_SEARCH_CONTEXT_CHARS],
+                    "source": _source_host(item.get("url", "")),
                 }
                 for item in value["output"].get("results", [])
             ],

@@ -7,7 +7,7 @@ from task3_agentic.memory import PersistentMemory
 from task3_agentic.runtime import AgentRuntime
 from task3_agentic.schemas import ResearchReport
 from task3_agentic.single_agent import SingleResearchAgent
-from task3_agentic.tests.conftest import AS_OF, ScriptedClient, finish, report, tool
+from task3_agentic.tests.conftest import AS_OF, ScriptedClient, ready, report, tool
 from task3_agentic.tools import tool_call_key
 
 
@@ -25,7 +25,8 @@ def test_duplicate_failed_call_blocked_then_other_source_succeeds(executor, tmp_
             tool("get_news", n=10, ticker=" nvda "),
             tool("web_search", query="NVDA risks"),
             tool("get_price_data", ticker="NVDA"),
-            finish(report(price_id="obs-3", research_id="obs-2")),
+            ready(),
+            report(price_id="obs-3", research_id="obs-2"),
         ]
     )
     run = SingleResearchAgent(
@@ -48,7 +49,8 @@ def test_changed_search_arguments_allowed_after_failure(executor, tmp_path):
             tool("web_search", query="NVDA too narrow"),
             tool("web_search", query="NVDA broader risks"),
             tool("get_price_data", ticker="NVDA"),
-            finish(report(price_id="obs-3", research_id="obs-2")),
+            ready(),
+            report(price_id="obs-3", research_id="obs-2"),
         ]
     )
     run = SingleResearchAgent(
@@ -78,14 +80,15 @@ def test_transient_legacy_client_failure_does_not_consume_decision(executor, tmp
             ConnectionError("private"),
             tool("get_price_data", ticker="NVDA"),
             tool("web_search", query="NVDA risk"),
-            finish(report(price_id="obs-1", research_id="obs-2")),
+            ready(),
+            report(price_id="obs-1", research_id="obs-2"),
         ]
     )
     with patch("task3_agentic.runtime.time.sleep") as sleep:
         run = SingleResearchAgent(
             AgentRuntime(client, executor, max_decisions=3), PersistentMemory(tmp_path)
         ).run(as_of=AS_OF)
-    assert run.report and len(client.requests) == 4
+    assert run.report and len(client.requests) == 5
     assert client.requests[1]["remaining_decisions"] == 3
     sleep.assert_called_once_with(1)
 
@@ -94,9 +97,10 @@ def test_qualitative_only_final_rejected_then_quantitative_added(executor, tmp_p
     client = ScriptedClient(
         [
             tool("web_search", query="NVDA risks"),
-            finish(report(price_id="obs-1", research_id="obs-1")),
+            ready(),
             tool("calculate_volatility", ticker="NVDA", window=60),
-            finish(report(price_id="obs-2", research_id="obs-1")),
+            ready(),
+            report(price_id="obs-2", research_id="obs-1"),
         ]
     )
     run = SingleResearchAgent(

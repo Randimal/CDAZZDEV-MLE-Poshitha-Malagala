@@ -53,6 +53,11 @@ def finish(output: dict) -> dict:
     }
 
 
+def ready() -> dict:
+    """Single-agent research readiness is separate from report synthesis."""
+    return {"kind": "finish", "reason": "Quantitative and qualitative evidence ready"}
+
+
 def report(
     *,
     price_id: str = "obs-1",
