@@ -152,7 +152,7 @@ def run_pipeline(
     return PipelineResult(
         ticker,
         data,
-        fetch_news(client, config.news_count) if include_news else [],
+        fetch_news(client, config.news_count, ticker=ticker) if include_news else [],
         summary,
         momentum,
     )

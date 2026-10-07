@@ -11,6 +11,8 @@ class AgentState(TypedDict):
     role: str
     stage: str
     steps: int
+    transport_failures: int
+    failed_calls: list[str]
     decision: AgentAction | None
     observations: list[ToolObservation]
     pending: ToolObservation | None

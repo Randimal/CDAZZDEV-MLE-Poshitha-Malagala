@@ -106,7 +106,9 @@ class FinancialTools:
 
     def get_news(self, ticker: str, n: int = 10) -> dict[str, Any]:
         ticker = normalize_ticker(ticker)
-        items = fetch_news(self.news_client_factory(ticker), count=max(10, n))[:n]
+        items = fetch_news(
+            self.news_client_factory(ticker), count=max(10, n), ticker=ticker
+        )[:n]
         self.known_headlines.update({item.title: item for item in items})
         return {"ticker": ticker, "headlines": [asdict(item) for item in items]}
 
@@ -198,6 +200,17 @@ ARGUMENT_SCHEMAS = {
     "llm_sentiment": SentimentArguments,
     "web_search": SearchArguments,
 }
+
+
+def tool_call_key(name: str, arguments: dict[str, Any]) -> str:
+    """Canonicalize defaults, ticker case and JSON ordering for failure tracking."""
+    try:
+        args = ARGUMENT_SCHEMAS[name].model_validate(arguments).model_dump()
+    except (KeyError, ValueError):
+        args = dict(arguments)
+    if isinstance(args.get("ticker"), str):
+        args["ticker"] = args["ticker"].strip().upper()
+    return json.dumps({"name": name, "arguments": args}, sort_keys=True)
 
 
 def empty_result(tool: str, output: dict[str, Any]) -> bool:

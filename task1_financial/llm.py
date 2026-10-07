@@ -2,21 +2,78 @@
 
 import json
 import logging
+import math
 import os
 import re
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Protocol, TypeVar
 
-from groq import Groq
+from groq import APIConnectionError, APIStatusError, APITimeoutError, Groq
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SECONDS = 20.0
 MAX_ATTEMPTS = 3
+TRANSPORT_ATTEMPTS = 4
+MAX_RETRY_WAIT_SECONDS = 60.0
 Output = TypeVar("Output", bound=BaseModel)
 
 
 class LLMConfigurationError(ValueError):
     """Required Groq configuration is absent."""
+
+
+class LLMTransportError(RuntimeError):
+    """Safe terminal provider failure after transport retries, without raw bodies."""
+
+    def __init__(self, category: str) -> None:
+        self.category = category
+        super().__init__(f"LLM provider unavailable: {category}")
+
+
+def error_category(exc: Exception) -> str:
+    """Classify using SDK types/status only; never inspect sensitive error text."""
+    if isinstance(exc, LLMTransportError):
+        return exc.category
+    if isinstance(exc, (APITimeoutError, TimeoutError)):
+        return "timeout"
+    if isinstance(exc, (APIConnectionError, ConnectionError)):
+        return "connection"
+    if isinstance(exc, APIStatusError):
+        if exc.status_code == 429:
+            return "rate_limit"
+        if exc.status_code in {408, 409, 498} or exc.status_code >= 500:
+            return "connection"
+        return "invalid_request"
+    if isinstance(exc, ValueError):
+        return "validation"
+    return "invalid_request"
+
+
+def retry_delay(exc: Exception, attempt: int) -> float:
+    """Exponential 1/2/4 seconds, honoring numeric or HTTP-date Retry-After.
+
+    A delay beyond the wait bound ends this request instead of retrying early.
+    """
+    delay = float(2**attempt)
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {})
+    value = headers.get("retry-after")
+    if value:
+        try:
+            wait = float(value)
+        except (TypeError, ValueError):
+            try:
+                wait = (
+                    parsedate_to_datetime(value) - datetime.now(timezone.utc)
+                ).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                wait = 0.0
+        if math.isfinite(wait):
+            delay = max(delay, wait)
+    return delay
 
 
 class CompletionClient(Protocol):
@@ -43,16 +100,38 @@ class GroqClient:
         self._client = Groq(api_key=key, timeout=DEFAULT_TIMEOUT_SECONDS, max_retries=0)
 
     def complete(self, system: str, user: str) -> str:
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0,
-            max_completion_tokens=self.max_completion_tokens,
-        )
+        """Retry transient transport errors internally; deterministic errors stop."""
+        for attempt in range(TRANSPORT_ATTEMPTS):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    max_completion_tokens=self.max_completion_tokens,
+                )
+                break
+            except Exception as exc:
+                category = error_category(exc)
+                delay = retry_delay(exc, attempt)
+                retry = (
+                    category in {"rate_limit", "timeout", "connection"}
+                    and attempt + 1 < TRANSPORT_ATTEMPTS
+                    and delay <= MAX_RETRY_WAIT_SECONDS
+                )
+                logger.warning(
+                    "LLM category=%s attempt=%d/%d retry=%s",
+                    category,
+                    attempt + 1,
+                    TRANSPORT_ATTEMPTS,
+                    retry,
+                )
+                if not retry:
+                    raise LLMTransportError(category) from None
+                time.sleep(delay)
         content = response.choices[0].message.content
         if not isinstance(content, str):
             raise ValueError("Provider returned no text")
@@ -101,6 +180,9 @@ def validated_completion(
             ):
                 raise ValueError("Returned headline does not match input")
             return output
+        except LLMTransportError as exc:
+            logger.warning("LLM category=%s; transport stopped", exc.category)
+            return None
         except Exception:
             logger.warning(
                 "LLM request/validation failed (attempt %d/%d)", attempt, attempts

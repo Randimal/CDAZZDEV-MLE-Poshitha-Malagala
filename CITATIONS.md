@@ -70,3 +70,16 @@ All AI-generated code must be reviewed, tested and understood by the candidate b
 References:
 - [LangGraph StateGraph API](https://reference.langchain.com/python/langgraph/graph/state/StateGraph): typed state, nodes and conditional routing.
 - [DDGS package/API](https://pypi.org/project/ddgs/): free structured search with the DuckDuckGo backend.
+
+## Task 3 live reliability fixes
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose: shared Yahoo news shortfall/RSS fallback; normalized failed-tool-call tracking; quantitative/qualitative completion guards; safe Groq error categories and bounded transport backoff; mocked regression tests; notebook/documentation corrections.
+
+Prompt: Fix only the observed Task 3 live reliability failures without redesigning the agent architecture or implementing Task 2. Preserve Yahoo as primary and supplement real news with no-key RSS, block duplicate identical failed calls while retaining autonomous selection, require grounded evidence coverage, handle transient Groq failures inside transport with bounded exponential backoff/Retry-After and safe logging, preserve planning budgets, and update executable Colab demonstrations without fabricated outputs.
+
+All AI-generated code must be reviewed, tested and understood by the candidate before submission.
+
+Reference: [Groq rate-limit headers](https://console.groq.com/docs/rate-limits) and [provider error codes](https://console.groq.com/docs/errors). Google News RSS is a free best-effort search feed, not a guaranteed market-data service.

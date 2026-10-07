@@ -17,6 +17,12 @@ from task3_agentic.tracing import ToolTracer
 AS_OF = date(2026, 10, 7)
 
 
+@pytest.fixture(autouse=True)
+def offline_news_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let a mocked short Yahoo response trigger live RSS access."""
+    monkeypatch.setattr("task1_financial.news.fetch_rss_news", lambda *args: [])
+
+
 class ScriptedClient:
     def __init__(self, responses: list[dict | Exception]) -> None:
         self.responses = iter(responses)

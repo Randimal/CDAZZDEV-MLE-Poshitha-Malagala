@@ -1,6 +1,7 @@
 """Shared LangGraph decide -> tool -> observe -> replan execution loop."""
 
 import math
+import time
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -9,7 +10,12 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
 from task1_financial.json_utils import json_payload
-from task1_financial.llm import CompletionClient, parse_output
+from task1_financial.llm import (
+    CompletionClient,
+    LLMTransportError,
+    error_category,
+    parse_output,
+)
 from task3_agentic.prompts import AGENT_SYSTEM, TOOL_DESCRIPTIONS
 from task3_agentic.schemas import (
     METRIC_PATHS,
@@ -23,10 +29,36 @@ from task3_agentic.schemas import (
     TraceEvent,
 )
 from task3_agentic.state import AgentState, observation_view
-from task3_agentic.tools import ARGUMENT_SCHEMAS, ROLE_TOOLS, ToolExecutor
+from task3_agentic.tools import (
+    ARGUMENT_SCHEMAS,
+    ROLE_TOOLS,
+    ToolExecutor,
+    tool_call_key,
+)
 from task3_agentic.tracing import event, redact
 
 DEFAULT_DECISION_BUDGET = 12
+MAX_UNCLASSIFIED_TRANSPORT_FAILURES = 2
+
+
+def evidence_coverage(state: AgentState) -> dict[str, bool]:
+    """Require price/volatility AND news/search, accepting validated A handoff."""
+    quantitative = any(
+        item.success and item.tool_name in {"get_price_data", "calculate_volatility"}
+        for item in state["observations"]
+    )
+    brief = state["context"].get("brief", {})
+    quantitative = quantitative or any(
+        metric.get("value") is not None and metric.get("name") != "sentiment_score"
+        for metric in brief.get("metrics", [])
+    )
+    return {
+        "quantitative": quantitative,
+        "qualitative": any(
+            item.success and item.tool_name in {"get_news", "web_search"}
+            for item in state["observations"]
+        ),
+    }
 
 
 @dataclass
@@ -76,13 +108,9 @@ def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
         if output.ticker != state["ticker"] or output.as_of != as_of:
             raise ValueError("Report ticker/date must match run")
         allowed = {item.evidence_id for item in observations if item.success}
-        if not any(
-            item.success
-            and item.tool_name in {"get_news", "web_search", "llm_sentiment"}
-            for item in observations
-        ):
+        if not all(evidence_coverage(state).values()):
             raise ValueError(
-                "Market sentiment needs a successful news/search/sentiment observation"
+                "Report requires quantitative and qualitative observations"
             )
         quantitative = {
             item.evidence_id
@@ -164,6 +192,8 @@ class AgentRuntime:
                     "role": role,
                     "stage": stage,
                     "remaining_decisions": self.max_decisions - state["steps"],
+                    "failed_tool_calls": state["failed_calls"],
+                    "report_evidence_coverage": evidence_coverage(state),
                     "allowed_tools": {
                         name: {
                             "description": TOOL_DESCRIPTIONS[name],
@@ -204,9 +234,51 @@ class AgentRuntime:
             ]
             try:
                 text = self.client.complete(AGENT_SYSTEM, user)
+            except Exception as exc:
+                category = error_category(exc)
+                trace.append(event(role, "llm_failure", {"category": category}))
+                failures = state["transport_failures"] + 1
+                # GroqClient has already exhausted its bounded transport backoff.
+                # An injected legacy client has a separate two-failure safety bound.
+                terminal = (
+                    isinstance(exc, (LLMTransportError, ValueError))
+                    or failures >= MAX_UNCLASSIFIED_TRANSPORT_FAILURES
+                )
+                if not terminal:
+                    time.sleep(1.0)
+                return {
+                    "transport_failures": failures,
+                    "decision": None,
+                    "trace": trace,
+                    "error": f"LLM transport stopped: {category}" if terminal else None,
+                    "feedback": f"LLM transport failure category={category}.",
+                }
+            try:
                 trace.append(event(role, "llm_response", {"text": text}))
                 action = parse_output(text, AgentAction)
                 trace.append(event(role, "decision", action.model_dump()))
+                if (
+                    action.kind == "tool"
+                    and tool_call_key(action.tool_name, action.arguments)
+                    in state["failed_calls"]
+                ):
+                    trace.append(
+                        event(
+                            role,
+                            "duplicate_failed_call_blocked",
+                            {
+                                "tool_name": action.tool_name,
+                                "arguments": action.arguments,
+                            },
+                        )
+                    )
+                    return {
+                        "steps": state["steps"] + 1,
+                        "decision": None,
+                        "trace": trace,
+                        "feedback": "This exact tool call already failed and is blocked. "
+                        "Choose another source/tool or change the arguments.",
+                    }
                 return {
                     "steps": state["steps"] + 1,
                     "decision": action,
@@ -218,7 +290,7 @@ class AgentRuntime:
                     event(
                         role,
                         "llm_failure",
-                        {"reason": "API or decision validation failure"},
+                        {"category": "validation"},
                     )
                 )
                 return {
@@ -254,6 +326,12 @@ class AgentRuntime:
                 return {}
             observation = state["pending"]
             return {
+                "failed_calls": state["failed_calls"]
+                + (
+                    [tool_call_key(observation.tool_name, observation.arguments)]
+                    if not observation.success
+                    else []
+                ),
                 "observations": state["observations"] + [observation],
                 "trace": state["trace"]
                 + [
@@ -281,7 +359,9 @@ class AgentRuntime:
                 }
             except Exception:
                 return {
-                    "feedback": "Final output invalid or ungrounded. Correct schema, ticker/date, metric paths and evidence IDs.",
+                    "feedback": "Final output invalid or ungrounded. Correct schema, ticker/date, metric paths and evidence IDs. "
+                    f"Report evidence coverage: {evidence_coverage(state)}; "
+                    "a report needs quantitative price/volatility AND qualitative news/search evidence.",
                     "trace": state["trace"]
                     + [
                         event(
@@ -328,6 +408,12 @@ class AgentRuntime:
             "role": role,
             "stage": stage,
             "steps": 0,
+            "transport_failures": 0,
+            "failed_calls": [
+                tool_call_key(item.tool_name, item.arguments)
+                for item in (observations or [])
+                if not item.success
+            ],
             "decision": None,
             "observations": observations or [],
             "pending": None,
