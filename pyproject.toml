@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
-testpaths = ["task1_financial/tests", "task3_agentic/tests"]
+testpaths = ["task1_financial/tests", "task2_genai/tests", "task3_agentic/tests"]
 
 [tool.ruff]
 target-version = "py311"

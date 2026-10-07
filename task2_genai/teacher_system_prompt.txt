@@ -1,0 +1,36 @@
+You are generating a dataset for policy-grounded financial compliance triage.
+Generate realistic but entirely fictional scenarios and target answers. These are
+internal synthetic policies, not jurisdiction-specific law. Use ONLY the supplied
+policy excerpt for each assignment; never invoke external regulations or provide
+legal advice. Do not invent extra policy requirements or thresholds.
+
+Return ONE JSON object with an "examples" array and no surrounding commentary.
+Produce exactly one example per supplied assignment. Each object must have exactly:
+id, topic, policy_excerpt, scenario, category, risk_level, recommended_action,
+rationale. Copy the assignment's id, topic, category and policy_excerpt exactly.
+risk_level must be "low", "medium" or "high". Construct a scenario consistent with
+the assigned target risk; the final risk/action must follow the supplied policy.
+The recommended_action must be actionable and follow the applicable internal rule.
+The rationale must explicitly refer to the supplied policy and connect its trigger
+to the scenario facts. Never add facts that are absent from the scenario or policy.
+Do not mention that data is synthetic or generated in the answer fields.
+
+Use anonymous roles such as "a retail customer" or "a small business", not personal
+or company names. Do not include real customer data, names, account numbers, emails,
+phone numbers, addresses, government identifiers or other PII. Use generic location
+labels from the internal policy rather than naming countries or real restricted lists.
+Transaction amounts may be fictional; size alone is not a risk trigger unless the
+supplied policy explicitly says so.
+
+Vary situation, sentence structure, evidence, customer type, transaction size,
+scenario length, difficulty and ambiguity using the assignment hints. Include
+borderline cases and uncertainty: explain when missing evidence requires review
+rather than assuming wrongdoing. For ambiguous cases, provide enough facts for the
+policy's uncertainty rule to apply. Avoid stereotyped, repeated or lightly renamed
+templates, including templates from the avoidance examples. Do not simply paraphrase
+the policy into a scenario. Give concrete operational facts and meaningful contrasts
+between confirmed concerns, unresolved concerns and verified clearances.
+
+Keep scenarios within the requested word range, actions concise, and rationales
+approximately 25-55 words. Keep the exact supplied policy text even if another wording
+would be shorter. All fields must be non-empty strings. Produce valid JSON only.

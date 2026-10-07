@@ -7,7 +7,8 @@ Senior Machine Learning Engineer assessment for CDAZZDEV. Task 1 includes a conf
 | Task 1A — Financial data pipeline | Implemented |
 | Task 1B — LLM sentiment and recommendation | Implemented |
 | Task 1 bonus — Research brief | Implemented |
-| Task 2 | Pending |
+| Task 2A — Synthetic compliance dataset | Implemented; live generation pending |
+| Task 2B/2C — Student training/evaluation | Pending |
 | Task 3 — Agentic workflows | Implemented |
 
 ## Architecture
@@ -29,7 +30,7 @@ task1_financial/
   report.py                    Markdown, styled HTML and PNG chart
   tests/                       deterministic pytest suite
   task1_financial.ipynb         executable local/Colab demonstration
-task2_genai/README.md           placeholder
+task2_genai/                    synthetic policies, batched teacher generation, validation and chat splits
 task3_agentic/                  LangGraph agents, tools, typed handoffs, memory and tracing
 ```
 
@@ -49,7 +50,7 @@ python -m pip install -r requirements.txt
 
 ```bash
 python -m pytest -q
-python -m compileall -q shared task1_financial
+python -m compileall -q shared task1_financial task2_genai task3_agentic
 ```
 
 Tests use synthetic prices and mocked Yahoo/Groq clients; they require neither network access nor API keys. Report tests write to temporary directories. Live requests are separate smoke checks, not part of the suite.
@@ -78,7 +79,24 @@ Open `jupyter notebook task3_agentic/task3_agentic.ipynb` locally or load it fro
 
 The single agent chooses among five tools. The two-agent graph restricts Agent A to price/volatility/sentiment and Agent B to news/search, with a mandatory typed brief → review → clarification → report path. Tool order within stages is selected by the LLM from observations, including failures. Reports contain financial-health and sentiment summaries, exactly three evidence-linked 90-day risks and one quantitatively supported hedge concept.
 
-The notebook exposes sanitized messages/decisions/observations/handoffs, a follow-up without data-tool calls, and a saved first run followed by a new-session cache hit. Reports are cached in `task3_agentic/memory/TICKER_UTC-DATE.json` with separate single/multi slots. Tools append to `task3_agentic/logs/agent_trace.jsonl`, intentionally committed for submission; temporary logs and cache files remain ignored. `use_cache=False` reruns the graph and clears session snapshots. News uses Yahoo first with recent no-key RSS fallback. Identical failed tool calls are blocked; reports require quantitative and qualitative evidence. Groq transient transport failures use bounded backoff without consuming planning steps. Reliability validation: 128 tests passed; a real RSS smoke returned ten NVDA headlines, while live agent completion needs Colab Groq credentials. See [Task 3 documentation](task3_agentic/README.md) for validation steps and limitations. Task 2 remains unimplemented.
+The notebook exposes sanitized messages/decisions/observations/handoffs, a follow-up without data-tool calls, and a saved first run followed by a new-session cache hit. Reports are cached in `task3_agentic/memory/TICKER_UTC-DATE.json` with separate single/multi slots. Tools append to `task3_agentic/logs/agent_trace.jsonl`, intentionally committed for submission; temporary logs and cache files remain ignored. `use_cache=False` reruns the graph and clears session snapshots. News uses Yahoo first with recent no-key RSS fallback. Identical failed tool calls are blocked; reports require quantitative and qualitative evidence. Groq transient transport failures use bounded backoff without consuming planning steps. Reliability validation: 128 tests passed; a real RSS smoke returned ten NVDA headlines, while live agent completion needs Colab Groq credentials. See [Task 3 documentation](task3_agentic/README.md) for validation steps and limitations.
+
+## Task 2A: policy-grounded compliance dataset
+
+Open [the single Task 2 notebook](task2_genai/task2_genai.ipynb) in Colab or locally.
+Task 2A requests 160 fictional internal-policy examples in batches of ten from
+`openai/gpt-oss-120b` via Groq, validates and globally deduplicates them, displays
+diversity, and produces seeded 80/10/10 chat splits only after retaining at least
+120 clean examples. The planned student is `Qwen/Qwen2.5-3B-Instruct`; no model is
+loaded or trained in this phase. Task 2B/2C remain pending.
+
+Use environment variables/Colab Secrets for Groq; default free-tier pacing is
+60 seconds between requests. Raw responses, clean records, audit summaries and
+protected split manifests are saved under `task2_genai/data/` only from actual
+generation. No dataset or notebook outputs are fabricated. Download the real data
+and executed notebook after generation and manual grounding review. These fictional
+policy outputs are not legal advice. See [Task 2 documentation](task2_genai/README.md)
+for generation settings, artifact formats and test-set protection.
 
 ## Security and secrets
 

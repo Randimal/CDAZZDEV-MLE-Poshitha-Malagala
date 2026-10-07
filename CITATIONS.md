@@ -129,3 +129,40 @@ Prompt: Preserve the final Task 3 architecture and freeze Tasks 1/2. Make the li
 References: [Groq API parameters](https://console.groq.com/docs/api-reference), [Groq rate limits](https://console.groq.com/docs/rate-limits).
 
 All AI-generated code must be reviewed, tested and understood by the candidate before submission.
+
+## Task 2A — Synthetic policy-grounded compliance dataset
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose: fictional internal policy taxonomy; full teacher prompt; Task 2-only batched
+Groq transport; Pydantic validation/rejection audit; lightweight deduplication;
+diversity analysis; reproducible chat-format splits; Colab notebook; mocked tests
+and documentation.
+
+Prompt: Implement only Task 2A while freezing Tasks 1 and 3. Generate approximately
+160 real teacher-produced candidates in batches of 10–20, targeting at least 120
+clean policy/scenario examples across fourteen compliance topics. Ground labels and
+rationales only in supplied fictional policies; reject invalid examples, prevent
+duplicate split leakage, display diversity and preserve a seeded 80/10/10 test set.
+Use Groq GPT-OSS 120B as teacher and plan a distinct Qwen2.5 3B Instruct student.
+Keep secrets secure, retain raw/clean provenance and do not fabricate examples or
+notebook results. No student training or Task 2B/2C implementation in this phase.
+
+Model/tool attribution:
+- Teacher: OpenAI `openai/gpt-oss-120b`, accessed through Groq; generation is pending
+  actual Colab/API execution, not claimed to have occurred during implementation.
+  References: [Groq supported models](https://console.groq.com/docs/models),
+  [JSON-object output mode](https://console.groq.com/docs/structured-outputs),
+  [supported reasoning settings](https://console.groq.com/docs/reasoning),
+  [Groq rate limits](https://console.groq.com/docs/rate-limits).
+- Planned student: Qwen Team `Qwen/Qwen2.5-3B-Instruct`, distributed by Hugging Face.
+  Task 2A prepares role-based messages for its tokenizer chat template; weights and
+  tokenizer have not been loaded, trained or evaluated. Review its Qwen research
+  license before the next phase. References:
+  [official model card and license](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct),
+  [Qwen chat-template documentation](https://qwen.readthedocs.io/en/v2.5/inference/chat.html).
+
+All AI-generated code must be reviewed, tested and understood by the candidate
+before submission. This entry attributes AI-assisted implementation; it does not
+claim the candidate personally authored generated code or provide legal advice.
