@@ -11,6 +11,7 @@ Answer the assessment's current financial-health/market-sentiment question with 
 | `runtime.py` | Shared bounded LangGraph decision/tool/observation loop and evidence validation |
 | `synthesis.py` | Single-agent final synthesis with a compact digest, local validation and one targeted repair |
 | `demonstrations.py` | Opt-in, one-failure executor for the labelled notebook replan demonstration |
+| `demo_client.py` | Task 3-only request budgets, supported reasoning options and optional section pacing |
 | `single_agent.py` | Single researcher with persistent cache guard |
 | `multi_agent.py` | Mandatory analyst/review/clarification/writer graph |
 | `prompts.py` | Separate agent, tool-description and follow-up instructions |
@@ -103,20 +104,28 @@ Redaction removes secret-named fields, configured secret values, bearer credenti
 
 ## Running and verification
 
-The notebook includes a clearly labelled **Controlled failure injection for fallback demonstration**. ControlledFailureExecutor temporarily substitutes a failing dependency for the first allowed tool actually selected; the real dispatcher records one failed observation and the LLM decides its next action. It is an opt-in, single-threaded showcase, not a production outage or fixed replacement plan. Its cache directory is separate from the main workflows. Real external failures may also occur; only actual trace/output can establish live recovery.
+The notebook includes a clearly labelled **Controlled failure injection for fallback demonstration**. ControlledFailureExecutor temporarily substitutes a failing dependency for the first allowed tool actually selected; the real dispatcher records one failed observation and the LLM decides its next action. It is an opt-in, single-threaded showcase, not a production outage or fixed replacement plan. The supplementary cell runs the real runtime with a three-decision demo limit and does not regenerate a report or save another research cache. Real external failures may also occur; only actual trace/output can establish live recovery.
 
 The permission demo dispatches A→web_search and B→get_price_data, displaying failed PermissionError observations without provider access. Follow-up output explicitly shows tool_calls_before/after and zero difference. A new NoCallsClient session for the second same-day cache run displays cache_hit=True, new_tool_calls=0, new_llm_calls=0. Main first runs use use_cache=False, which is the refresh equivalent, so cached output cannot replace the first-run demonstrations.
 
-Install root requirements using Python 3.11+. Configure GROQ_API_KEY/GROQ_MODEL securely and open task3_agentic.ipynb locally or in Colab. The notebook uses GroqClient(max_completion_tokens=1800); Task 1's default remains 700.
+Install root requirements using Python 3.11+. Configure GROQ_API_KEY/GROQ_MODEL securely and open task3_agentic.ipynb locally or in Colab. The notebook uses the Task 3-only Task3GroqClient in demo_client.py; the frozen Task 1 client and all graph/permission/schema/memory/cache contracts remain unchanged.
+
+Completion caps are planner **768**, critique **512**, analyst brief **1200**, analyst clarification **900**, follow-up **640**, headline sentiment **384**, and final reports **1800**. A brief/clarification stage can finish with a typed handoff, so its cap must fit that output. Writer-final decisions retain the report allowance because the LLM may finish on any call; predicting the action to shrink its budget would undermine autonomy. Unknown requests use the report cap. These are configurable output ceilings, not measured token usage; prompt tokens still count toward TPM. The client logs safe request-profile/budget diagnostics and counts logical calls, not individual transport retries.
+
+Optional reasoning_effort is LOW for non-report calls and MEDIUM for reports only when both the installed Groq SDK and a verified supported model (GPT-OSS 20B/120B) support it. Other models receive no extra reasoning parameter and no model is switched. The Task 3 adapter reuses the existing SDK/environment setup and transport classification/Retry-After helpers, with the same bounded retry and wait rules. See [Groq's API reference](https://console.groq.com/docs/api-reference).
+
+**Free-tier pacing between independent demonstration sections:** DemoPacer waits only the remainder of 60 seconds since the last logical LLM completion, including failures. It is called by notebook sections, never graph/business-logic nodes. Set FREE_TIER_PACING=False for higher quotas, or configure PACE_WINDOW_SECONDS. Sleep/clock/announcements are injectable for fast tests. No initial wait occurs before this client has made a request; user review time reduces or eliminates later waits. The notebook prints the reason and duration before waiting. This conservative one-minute spacing is not an exact quota reset or a guarantee: organization-wide traffic and calls within a workflow can still rate-limit. Real 429s remain visible and provider Retry-After/backoff remains authoritative. See [Groq rate limits](https://console.groq.com/docs/rate-limits).
+
+The explicit five-tool showcase scores **one real headline** as a smoke test only, saving two calls relative to its former three-headline demo. Full workflow sentiment remains unrestricted. The supplementary controlled-failure cell now uses the same real graph with an existing three-decision limit and reuses available FinancialTools snapshots. It demonstrates failure/observation/autonomous replanning without regenerating a full report or saving an extra research cache. Intentional demo budget exhaustion is labelled; main single/multi workflows retain their normal budgets and reports. Any sentiment tool the demo LLM selects can still incur additional calls.
 
 ```python
-from task1_financial.llm import GroqClient
+from task3_agentic.demo_client import Task3GroqClient
 from task3_agentic.tools import FinancialTools, ToolExecutor
 from task3_agentic.runtime import AgentRuntime
 from task3_agentic.multi_agent import TwoAgentResearch
 from task3_agentic.memory import answer_followup
 
-client = GroqClient(max_completion_tokens=1800)
+client = Task3GroqClient()
 runtime = AgentRuntime(client, ToolExecutor(FinancialTools("NVDA", client)))
 run = TwoAgentResearch(runtime).run()
 if run.report is not None:
@@ -131,6 +140,8 @@ Validation on 2026-10-07: 105 tests passed, preserving all original 73. Import/c
 Reliability validation (2026-10-07): 128 offline tests passed, including all original 105. The live no-key RSS smoke returned ten recent real NVDA headlines with normal TLS verification. Groq credentials were unavailable locally, so a successful live single/two-agent report remains to be verified in Colab.
 
 Final-quality validation (2026-10-07): **165 tests passed**, preserving all prior 154 tests and adding 11 focused regressions. Existing single-agent mock fixtures now explicitly separate readiness from the subsequent synthesis response. Task 1, shared modules and Task 2 have no changes. Task 3 Ruff lint/format, import/compile/Python 3.11 syntax, notebook schema/cell syntax and Git whitespace checks passed. Changed notebook demonstration cells were executed with mocked services without saving outputs. Live connectivity returned ten real headlines and five search results; Yahoo price history failed local TLS verification, which was not bypassed. Groq settings were unavailable, so no successful live agent/notebook run is claimed.
+
+Free-tier demonstration validation (2026-10-07): **178 tests passed**, preserving all prior 165 and adding 13 request-budget/reasoning/Retry-After/pacing cases with injected sleeps/clocks. Lint/format, imports/compile, notebook schema/syntax and whitespace checks passed. The shortened failure cell executed the real graph with mocked services: one injected failure, autonomous alternative observations, three planning calls and no duplicate report. The same offline checks confirmed follow-up/cache/restriction demonstrations remain functional. No notebook outputs were cleared or fabricated; no live Groq rerun is claimed for this change.
 
 Use the updated checkout and a fresh Colab runtime. Run code cells **2, 4, 6, 8, 9, 11, 13, 15, 17, 19 and 21** in order (numbers include Markdown cells): setup/configuration, five-tool smoke, single research/trace/report, injected failure, multi-agent critique/report, permissions, follow-up, cache hit, and JSONL sample. All 22 cells can also be run with Run all. Save the real executed notebook and updated sanitized trace for submission; the local notebook has no fabricated execution outputs.
 

@@ -116,3 +116,16 @@ Purpose: audit the existing LangGraph workflows; separate single-agent research 
 Prompt: Improve Task 3 only while freezing Task 1 and leaving Task 2 pending. Preserve autonomous tool selection, role restrictions, typed handoffs, tracing and memory. Route evidence-sufficient single-agent research to one locally validated synthesis call with at most one targeted repair, request missing analysis through the mandatory critique loop, demonstrate one injected failure with autonomous replanning and denied role access, and visibly prove follow-up/cache call counts without fabricated notebook outputs or reports.
 
 All AI-generated code must be reviewed, tested and understood by the candidate before submission.
+
+## Task 3 free-tier demonstration reliability
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose: Task 3-only completion budgets/supported reasoning settings, injectable section pacing, reduced duplicate smoke/failure-demo calls, focused mocked tests and notebook/documentation updates.
+
+Prompt: Preserve the final Task 3 architecture and freeze Tasks 1/2. Make the live notebook practical on Groq Free by scoring one real smoke-test headline, matching output budgets to existing request contracts, sending optional reasoning parameters only when supported, retaining Retry-After/backoff, announcing configurable waits between independent sections, and shortening the supplementary failure demo without fixing tool order or clearing/fabricating outputs.
+
+References: [Groq API parameters](https://console.groq.com/docs/api-reference), [Groq rate limits](https://console.groq.com/docs/rate-limits).
+
+All AI-generated code must be reviewed, tested and understood by the candidate before submission.
