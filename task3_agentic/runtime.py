@@ -5,7 +5,7 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
@@ -60,6 +60,12 @@ from task3_agentic.validation import (
 
 DEFAULT_DECISION_BUDGET = 12
 MAX_UNCLASSIFIED_TRANSPORT_FAILURES = 2
+
+
+class _WriterToolAction(AgentAction):
+    """Writer-review readiness contract until qualitative evidence is retrieved."""
+
+    kind: Literal["tool"]
 
 
 def evidence_coverage(state: AgentState) -> dict[str, bool]:
@@ -257,7 +263,6 @@ class AgentRuntime:
         """The LLM chooses tools or finish; graph edges only enforce the loop."""
         allowed = ROLE_TOOLS[role]
         separate_synthesis = stage == "single_research"
-        action_schema = ResearchDecision if separate_synthesis else AgentAction
         system = (
             SINGLE_PLANNER_SYSTEM
             if separate_synthesis
@@ -274,6 +279,13 @@ class AgentRuntime:
                     "trace": state["trace"]
                     + [event(role, "stopped", {"reason": "decision budget"})],
                 }
+            coverage = evidence_coverage(state)
+            writer_needs_evidence = (
+                stage == "writer_review" and not coverage["qualitative"]
+            )
+            action_schema = ResearchDecision if separate_synthesis else AgentAction
+            if writer_needs_evidence:
+                action_schema = _WriterToolAction
             payload = redact(
                 {
                     "query": state["query"],
@@ -283,7 +295,7 @@ class AgentRuntime:
                     "stage": stage,
                     "remaining_decisions": self.max_decisions - state["steps"],
                     "failed_tool_calls": state["failed_calls"],
-                    "report_evidence_coverage": evidence_coverage(state),
+                    "report_evidence_coverage": coverage,
                     "allowed_tools": {
                         name: {
                             "description": TOOL_DESCRIPTIONS[name],
@@ -331,8 +343,13 @@ class AgentRuntime:
                     "feedback": state["feedback"],
                 }
             )
-            if separate_synthesis:
-                # The report schema is supplied once to synthesis, never to the planner.
+            if stage == "writer_review":
+                payload["stage_readiness"] = {
+                    "finish_allowed": not writer_needs_evidence,
+                    "requirement": "Retrieve successful get_news or web_search evidence before requesting analyst clarification.",
+                }
+            if separate_synthesis or writer_needs_evidence:
+                # Omit finish details when this decision cannot produce that output.
                 payload.pop("finish_output_schema")
             user = json.dumps(
                 json_safe(payload),
