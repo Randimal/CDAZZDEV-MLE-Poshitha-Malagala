@@ -138,6 +138,17 @@ class ResearchReport(Model):
     clarification_used: str | None = None
 
 
+class WriterResearchReport(ResearchReport):
+    """Writer-only contract; single-agent research has no clarification handoff."""
+
+    clarification_used: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Required: copy handoff_context.clarification.answer verbatim. "
+        "Citing analyst_clarification alone does not satisfy this field.",
+    )
+
+
 class FollowupAnswer(Model):
     answer: str = Field(min_length=1, max_length=1000)
     evidence_ids: list[str]

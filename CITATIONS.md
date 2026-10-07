@@ -83,3 +83,14 @@ Prompt: Fix only the observed Task 3 live reliability failures without redesigni
 All AI-generated code must be reviewed, tested and understood by the candidate before submission.
 
 Reference: [Groq rate-limit headers](https://console.groq.com/docs/rate-limits) and [provider error codes](https://console.groq.com/docs/errors). Google News RSS is a free best-effort search feed, not a guaranteed market-data service.
+
+## Task 3 writer and prompt-size regression fixes
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose: explicit writer clarification schema and targeted validation feedback; compact planner evidence/schema payloads; safe provider status/code diagnostics; conservative fundamental-claim and hedge-math safeguards; focused mocked regression tests; existing notebook/documentation updates.
+
+Prompt: Preserve the Task 3 architecture and leave Task 2 untouched. Fix the live writer's null clarification_used loop without relaxing critique incorporation; reduce planner token pressure while retaining evidence IDs and autonomous selection; bound deterministic writer corrections separately from provider retries; reject unsupported financial-health/optimal-option claims and distinguish annualized volatility from 90-trading-day historical risk scaling. Add focused regressions and executable notebook checks without fabricated outputs.
+
+All AI-generated code must be reviewed, tested and understood by the candidate before submission.

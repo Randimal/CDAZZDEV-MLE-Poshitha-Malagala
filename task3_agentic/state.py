@@ -4,6 +4,8 @@ from typing import Any, TypedDict
 
 from task3_agentic.schemas import AgentAction, ToolObservation, TraceEvent
 
+MAX_SEARCH_CONTEXT_CHARS = 400
+
 
 class AgentState(TypedDict):
     query: str
@@ -13,6 +15,7 @@ class AgentState(TypedDict):
     steps: int
     transport_failures: int
     failed_calls: list[str]
+    output_failures: int
     decision: AgentAction | None
     observations: list[ToolObservation]
     pending: ToolObservation | None
@@ -24,14 +27,76 @@ class AgentState(TypedDict):
 
 
 def observation_view(observation: ToolObservation) -> dict[str, Any]:
-    """Retain full price history in session; send only recent rows to the LLM."""
+    """Keep evidence IDs/numeric paths; omit historical rows and bulky source URLs.
+
+    Full provider output stays in the observation/session. This view is also used
+    for persisted/follow-up context; it never mutates retrieved observations.
+    """
     value = observation.model_dump()
     if observation.tool_name == "get_price_data" and observation.success:
-        output = dict(value["output"])
-        output["row_count"] = output.get("row_count", len(output.get("rows", [])))
-        output["rows"] = output.get("rows", [])[-5:]
+        output = {
+            key: value["output"].get(key)
+            for key in (
+                "ticker",
+                "period",
+                "price_basis",
+                "summary",
+                "latest_indicators",
+            )
+        }
+        rows = value["output"].get("rows", [])
+        output["row_count"] = value["output"].get("row_count", len(rows))
+        output["as_of"] = value["output"].get("as_of") or (
+            rows[-1].get("date") if rows else None
+        )
         value["output"] = output
+    elif observation.tool_name == "get_news" and observation.success:
+        value["output"] = {
+            "ticker": value["output"].get("ticker"),
+            "headlines": [
+                {key: item.get(key) for key in ("title", "publisher", "published_at")}
+                for item in value["output"].get("headlines", [])
+            ],
+        }
+    elif observation.tool_name == "web_search" and observation.success:
+        value["output"] = {
+            "query": value["output"].get("query"),
+            "results": [
+                {
+                    "title": item.get("title"),
+                    "snippet": item.get("snippet", "")[:MAX_SEARCH_CONTEXT_CHARS],
+                }
+                for item in value["output"].get("results", [])
+            ],
+        }
+    elif observation.tool_name == "llm_sentiment" and observation.success:
+        value["output"] = {"aggregate": value["output"]["aggregate"]}
+        value["arguments"] = {
+            "headline_count": observation.arguments.get(
+                "headline_count", len(observation.arguments.get("headlines", []))
+            )
+        }
     return value
+
+
+def compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Remove presentation metadata, preserving fields, refs and validation rules."""
+    result = {}
+    for key, value in schema.items():
+        if key in {"title", "description", "default"}:
+            continue
+        if key in {"properties", "$defs"}:
+            result[key] = {name: compact_schema(item) for name, item in value.items()}
+        elif isinstance(value, dict):
+            result[key] = compact_schema(value)
+        elif isinstance(value, list):
+            result[key] = [
+                compact_schema(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
 
 
 class MultiState(TypedDict, total=False):

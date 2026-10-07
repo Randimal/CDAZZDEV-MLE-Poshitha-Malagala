@@ -1,5 +1,6 @@
 """Shared LangGraph decide -> tool -> observe -> replan execution loop."""
 
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -9,12 +10,13 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
-from task1_financial.json_utils import json_payload
+from task1_financial.json_utils import json_safe
 from task1_financial.llm import (
     CompletionClient,
     LLMTransportError,
     error_category,
     parse_output,
+    safe_provider_details,
 )
 from task3_agentic.prompts import AGENT_SYSTEM, TOOL_DESCRIPTIONS
 from task3_agentic.schemas import (
@@ -27,8 +29,9 @@ from task3_agentic.schemas import (
     Role,
     ToolObservation,
     TraceEvent,
+    WriterResearchReport,
 )
-from task3_agentic.state import AgentState, observation_view
+from task3_agentic.state import AgentState, compact_schema, observation_view
 from task3_agentic.tools import (
     ARGUMENT_SCHEMAS,
     ROLE_TOOLS,
@@ -36,9 +39,16 @@ from task3_agentic.tools import (
     tool_call_key,
 )
 from task3_agentic.tracing import event, redact
+from task3_agentic.validation import (
+    GroundingError,
+    annualized_values,
+    safe_validation_feedback,
+    validate_report_language,
+)
 
 DEFAULT_DECISION_BUDGET = 12
 MAX_UNCLASSIFIED_TRANSPORT_FAILURES = 2
+MAX_WRITER_OUTPUT_FAILURES = 3
 
 
 def evidence_coverage(state: AgentState) -> dict[str, bool]:
@@ -73,19 +83,25 @@ def validate_metric(metric: QuantMetric, observations: list[ToolObservation]) ->
     """Validate numeric handoff values against successful tool output paths."""
     sources = {item.evidence_id: item for item in observations if item.success}
     if metric.evidence_id not in sources or metric.path != METRIC_PATHS[metric.name]:
-        raise ValueError("Metric must cite a canonical successful observation")
+        raise GroundingError(
+            "metrics.evidence_id/path: cite a successful observation and canonical metric path"
+        )
     actual = sources[metric.evidence_id].output
     for key in metric.path.split("."):
         actual = actual[key]
     if actual is None:
         if metric.value is not None:
-            raise ValueError("Missing metric cannot be assigned a numeric value")
+            raise GroundingError(
+                "metrics.value: retrieved missing value must remain null"
+            )
     elif (
         metric.value is None
         or isinstance(actual, bool)
         or not math.isclose(float(actual), metric.value, rel_tol=1e-9, abs_tol=1e-9)
     ):
-        raise ValueError("Metric does not match retrieved value")
+        raise GroundingError(
+            "metrics.value: copy the exact retrieved value at the cited path"
+        )
 
 
 def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
@@ -93,24 +109,28 @@ def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
     context = state["context"]
     if isinstance(output, QuantitativeBrief):
         if output.ticker != state["ticker"]:
-            raise ValueError("Incorrect brief ticker")
+            raise GroundingError("ticker: must match research ticker")
         for metric in output.metrics:
             validate_metric(metric, observations)
     elif isinstance(output, ClarificationResponse):
         request = context["request"]
         if output.question != request["question"]:
-            raise ValueError("Answer must address the exact clarification request")
+            raise GroundingError(
+                "question: copy the exact clarification request question"
+            )
         if output.metric:
             if output.metric.name != request["requested_metric"]:
-                raise ValueError("Clarification must supply the requested metric")
+                raise GroundingError("metric.name: must match request.requested_metric")
             validate_metric(output.metric, observations)
     elif isinstance(output, ResearchReport):
         if output.ticker != state["ticker"] or output.as_of != as_of:
-            raise ValueError("Report ticker/date must match run")
+            raise GroundingError(
+                "ticker/as_of: must match research ticker and run date"
+            )
         allowed = {item.evidence_id for item in observations if item.success}
         if not all(evidence_coverage(state).values()):
-            raise ValueError(
-                "Report requires quantitative and qualitative observations"
+            raise GroundingError(
+                "evidence coverage: need successful price/volatility AND news/search observations"
             )
         quantitative = {
             item.evidence_id
@@ -129,7 +149,9 @@ def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
             allowed.add("analyst_clarification")
             clarification = context["clarification"]
             if output.clarification_used != clarification["answer"]:
-                raise ValueError("Final report must explicitly incorporate the answer")
+                raise GroundingError(
+                    "clarification_used: must be non-empty and equal handoff_context.clarification.answer verbatim; an evidence citation alone is insufficient"
+                )
             if clarification["metric"] and clarification["metric"]["value"] is not None:
                 quantitative.add("analyst_clarification")
                 citations = [
@@ -139,17 +161,22 @@ def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
                 ]
                 citations += output.hedge_strategy_recommendation.evidence_ids
                 if "analyst_clarification" not in citations:
-                    raise ValueError(
-                        "The clarification must support the final analysis"
+                    raise GroundingError(
+                        "evidence_ids: cite analyst_clarification in a risk or hedge when its metric is available"
                     )
         citations = [
             source for risk in output.top_three_risks for source in risk.evidence_ids
         ]
         citations += output.hedge_strategy_recommendation.evidence_ids
         if not set(citations).issubset(allowed):
-            raise ValueError("Report cites missing or failed evidence")
+            raise GroundingError(
+                "evidence_ids: report cites missing/failed evidence; use allowed_evidence_ids only"
+            )
         if not set(output.hedge_strategy_recommendation.evidence_ids) & quantitative:
-            raise ValueError("Hedge must cite quantitative evidence")
+            raise GroundingError(
+                "hedge_strategy_recommendation.evidence_ids: must cite quantitative price/volatility or validated analyst evidence"
+            )
+        validate_report_language(output, annualized_values(observations, context))
 
 
 class AgentRuntime:
@@ -176,6 +203,8 @@ class AgentRuntime:
     ) -> StageResult:
         """The LLM chooses tools or finish; graph edges only enforce the loop."""
         allowed = ROLE_TOOLS[role]
+        if stage == "writer_final":
+            output_schema = WriterResearchReport
 
         def decide(state: AgentState) -> dict[str, Any]:
             if state["steps"] >= self.max_decisions:
@@ -197,14 +226,16 @@ class AgentRuntime:
                     "allowed_tools": {
                         name: {
                             "description": TOOL_DESCRIPTIONS[name],
-                            "arguments_schema": ARGUMENT_SCHEMAS[
-                                name
-                            ].model_json_schema(),
+                            "arguments_schema": compact_schema(
+                                ARGUMENT_SCHEMAS[name].model_json_schema()
+                            ),
                         }
                         for name in sorted(allowed)
                     },
-                    "action_schema": AgentAction.model_json_schema(),
-                    "finish_output_schema": output_schema.model_json_schema(),
+                    "action_schema": compact_schema(AgentAction.model_json_schema()),
+                    "finish_output_schema": compact_schema(
+                        output_schema.model_json_schema()
+                    ),
                     "allowed_evidence_ids": [
                         item.evidence_id
                         for item in state["observations"]
@@ -216,27 +247,50 @@ class AgentRuntime:
                         if "clarification" in state["context"]
                         else []
                     ),
-                    "canonical_metric_paths": METRIC_PATHS,
+                    "canonical_metric_paths": METRIC_PATHS
+                    if output_schema in {QuantitativeBrief, ClarificationResponse}
+                    else {},
                     "observations": [
                         observation_view(item) for item in state["observations"]
                     ],
                     "available_headlines": [
-                        vars(item)
+                        {"title": item.title}
                         for item in self.executor.tools.known_headlines.values()
-                    ],
+                    ]
+                    if "llm_sentiment" in allowed
+                    else [],
                     "handoff_context": state["context"],
                     "feedback": state["feedback"],
                 }
             )
-            user = json_payload(payload)
+            user = json.dumps(
+                json_safe(payload),
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
             trace = state["trace"] + [
-                event(role, "llm_request", {"system": AGENT_SYSTEM, "user": payload})
+                event(
+                    role,
+                    "llm_request",
+                    {
+                        "system": AGENT_SYSTEM,
+                        "user": payload,
+                        "prompt_chars": len(AGENT_SYSTEM) + len(user),
+                    },
+                )
             ]
             try:
                 text = self.client.complete(AGENT_SYSTEM, user)
             except Exception as exc:
                 category = error_category(exc)
-                trace.append(event(role, "llm_failure", {"category": category}))
+                trace.append(
+                    event(
+                        role,
+                        "llm_failure",
+                        {"category": category, **safe_provider_details(exc)},
+                    )
+                )
                 failures = state["transport_failures"] + 1
                 # GroqClient has already exhausted its bounded transport backoff.
                 # An injected legacy client has a separate two-failure safety bound.
@@ -285,7 +339,7 @@ class AgentRuntime:
                     "feedback": None,
                     "trace": trace,
                 }
-            except Exception:
+            except Exception as exc:
                 trace.append(
                     event(
                         role,
@@ -297,7 +351,7 @@ class AgentRuntime:
                     "steps": state["steps"] + 1,
                     "decision": None,
                     "trace": trace,
-                    "feedback": "Request failed or action JSON invalid. Correct or choose another approach.",
+                    "feedback": safe_validation_feedback(exc),
                 }
 
         def call_tool(state: AgentState) -> dict[str, Any]:
@@ -352,22 +406,31 @@ class AgentRuntime:
             try:
                 output = output_schema.model_validate(redact(state["decision"].output))
                 validate_output(output, state, as_of)
+                if isinstance(output, WriterResearchReport):
+                    # Validate with the writer contract, then keep the canonical
+                    # stored model identical to the cache's ResearchReport type.
+                    output = ResearchReport.model_validate(output.model_dump())
                 return {
                     "output": output,
                     "trace": state["trace"]
                     + [event(role, "stage_output", output.model_dump(mode="json"))],
                 }
-            except Exception:
+            except Exception as exc:
+                feedback = safe_validation_feedback(exc)
+                failures = state["output_failures"] + 1
                 return {
-                    "feedback": "Final output invalid or ungrounded. Correct schema, ticker/date, metric paths and evidence IDs. "
-                    f"Report evidence coverage: {evidence_coverage(state)}; "
-                    "a report needs quantitative price/volatility AND qualitative news/search evidence.",
+                    "feedback": feedback,
+                    "output_failures": failures,
+                    "error": f"Writer output validation exhausted: {feedback}"
+                    if stage == "writer_final"
+                    and failures >= MAX_WRITER_OUTPUT_FAILURES
+                    else None,
                     "trace": state["trace"]
                     + [
                         event(
                             role,
                             "output_rejected",
-                            {"reason": "schema or evidence validation"},
+                            {"reason": feedback, "attempt": failures},
                         )
                     ],
                 }
@@ -399,7 +462,9 @@ class AgentRuntime:
         )
         graph.add_conditional_edges(
             "finish",
-            lambda state: "stop" if state["output"] is not None else "decide",
+            lambda state: (
+                "stop" if state["output"] is not None or state["error"] else "decide"
+            ),
             {"stop": END, "decide": "decide"},
         )
         initial: AgentState = {
@@ -409,6 +474,7 @@ class AgentRuntime:
             "stage": stage,
             "steps": 0,
             "transport_failures": 0,
+            "output_failures": 0,
             "failed_calls": [
                 tool_call_key(item.tool_name, item.arguments)
                 for item in (observations or [])

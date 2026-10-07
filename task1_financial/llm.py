@@ -28,9 +28,49 @@ class LLMConfigurationError(ValueError):
 class LLMTransportError(RuntimeError):
     """Safe terminal provider failure after transport retries, without raw bodies."""
 
-    def __init__(self, category: str) -> None:
+    def __init__(
+        self,
+        category: str,
+        *,
+        status_code: int | None = None,
+        error_code: str | None = None,
+    ) -> None:
         self.category = category
+        self.status_code = status_code
+        self.error_code = error_code
         super().__init__(f"LLM provider unavailable: {category}")
+
+
+SAFE_PROVIDER_CODES = frozenset(
+    {
+        "rate_limit_exceeded",
+        "context_length_exceeded",
+        "model_not_found",
+        "json_validate_failed",
+        "tool_use_failed",
+        "invalid_request_error",
+        "invalid_api_key",
+        "authentication_error",
+        "tokens_per_minute_limit",
+    }
+)
+
+
+def safe_provider_details(exc: Exception) -> dict[str, int | str | None]:
+    """Extract status and allowlisted machine code only, never messages/headers."""
+    status = getattr(exc, "status_code", None)
+    code = getattr(exc, "error_code", None)
+    body = getattr(exc, "body", None)
+    if code is None and isinstance(body, dict):
+        error = body.get("error", body)
+        if isinstance(error, dict):
+            code = error.get("code")
+    return {
+        "status_code": status if type(status) is int and 100 <= status <= 599 else None,
+        "error_code": code
+        if isinstance(code, str) and code in SAFE_PROVIDER_CODES
+        else None,
+    }
 
 
 def error_category(exc: Exception) -> str:
@@ -116,6 +156,7 @@ class GroqClient:
                 break
             except Exception as exc:
                 category = error_category(exc)
+                details = safe_provider_details(exc)
                 delay = retry_delay(exc, attempt)
                 retry = (
                     category in {"rate_limit", "timeout", "connection"}
@@ -123,14 +164,16 @@ class GroqClient:
                     and delay <= MAX_RETRY_WAIT_SECONDS
                 )
                 logger.warning(
-                    "LLM category=%s attempt=%d/%d retry=%s",
+                    "LLM category=%s status=%s code=%s attempt=%d/%d retry=%s",
                     category,
+                    details["status_code"],
+                    details["error_code"],
                     attempt + 1,
                     TRANSPORT_ATTEMPTS,
                     retry,
                 )
                 if not retry:
-                    raise LLMTransportError(category) from None
+                    raise LLMTransportError(category, **details) from None
                 time.sleep(delay)
         content = response.choices[0].message.content
         if not isinstance(content, str):

@@ -24,6 +24,16 @@ from task3_agentic.schemas import Role, ToolObservation
 from task3_agentic.tracing import ToolTracer, redact
 
 TRADING_DAYS_PER_YEAR = 252
+HEDGE_HORIZON_TRADING_DAYS = 90
+
+
+def horizon_volatility(annualized: float) -> float:
+    """Historical 90-trading-day 1-sigma scale, not a forecast or option price."""
+    return float(
+        annualized * np.sqrt(HEDGE_HORIZON_TRADING_DAYS / TRADING_DAYS_PER_YEAR)
+    )
+
+
 ROLE_TOOLS: dict[str, frozenset[str]] = {
     "researcher": frozenset(
         {
@@ -129,6 +139,9 @@ class FinancialTools:
             "ticker": result.ticker,
             "window": window,
             "annualized_volatility": volatility,
+            "horizon_trading_days": HEDGE_HORIZON_TRADING_DAYS,
+            "horizon_volatility": horizon_volatility(volatility),
+            "horizon_formula": "annualized_volatility * sqrt(90 / 252)",
             "unit": "fraction",
             "observations": len(returns),
             "as_of": result.data.index[-1].isoformat(),
