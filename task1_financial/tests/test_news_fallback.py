@@ -46,6 +46,10 @@ def test_rss_parser_keeps_recent_real_metadata() -> None:
     payload = f"""<rss><channel>
     <item><title>Actual news - Wire</title><source>Wire</source>
     <pubDate>{recent}</pubDate><link>https://example.com/news</link></item>
+    <item><title> ACTUAL   news - Wire</title><source>Wire</source>
+    <pubDate>{recent}</pubDate><link>https://example.com/duplicate</link></item>
+    <item><title>Second real headline</title><source>Desk</source>
+    <pubDate>{recent}</pubDate><link>https://example.com/second</link></item>
     <item><title>Old news</title><pubDate>{stale}</pubDate>
     <link>https://example.com/old</link></item>
     <item><title>Bad date</title><pubDate>invalid</pubDate></item>
@@ -55,8 +59,8 @@ def test_rss_parser_keeps_recent_real_metadata() -> None:
     response.__exit__ = Mock(return_value=False)
     response.read.return_value = payload
     with patch("task1_financial.news.urlopen", return_value=response) as request:
-        items = fetch_rss_news("NVDA")
-    assert len(items) == 1
+        items = fetch_rss_news("NVDA", count=2)
+    assert len(items) == 2 and items[1].title == "Second real headline"
     assert items[0].title == "Actual news" and items[0].publisher == "Wire"
     assert items[0].published_at and items[0].url == "https://example.com/news"
     assert "when%3A7d" in request.call_args.args[0].full_url

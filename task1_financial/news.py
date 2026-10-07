@@ -65,7 +65,16 @@ def fetch_rss_news(ticker: str, count: int = 10) -> list[NewsHeadline]:
         if title:
             items.append(NewsHeadline(title, publisher, published.isoformat(), url))
     items.sort(key=lambda item: item.published_at or "", reverse=True)
-    return items[:count]
+    # Deduplicate before truncating so repeated feed entries cannot consume the
+    # requested quota while other usable recent headlines remain in the feed.
+    unique: list[NewsHeadline] = []
+    seen: set[str] = set()
+    for item in items:
+        key = " ".join(item.title.casefold().split())
+        if key not in seen:
+            unique.append(item)
+            seen.add(key)
+    return unique[:count]
 
 
 def _text(value: object) -> str | None:

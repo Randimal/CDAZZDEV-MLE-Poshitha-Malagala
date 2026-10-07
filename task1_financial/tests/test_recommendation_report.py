@@ -68,6 +68,9 @@ def test_recommendation_payload_and_retry(pipeline_result: PipelineResult) -> No
     assert payload["deterministic_momentum"] == "BULLISH"
     assert payload["aggregate_news_sentiment"]["failed_count"] == 4
     assert len(payload["indicators"]) == 9
+    assert payload["technical_facts"]["rsi_regime"] is None
+    assert payload["technical_facts"]["trend_structure"] == "bullish"
+    assert "rows" not in payload and "data" not in payload
     client = Mock()
     client.complete.side_effect = [
         '{"signal":"BUY"}',
@@ -77,6 +80,7 @@ def test_recommendation_payload_and_retry(pipeline_result: PipelineResult) -> No
     assert result.signal == "HOLD" and client.complete.call_count == 2
     sent = client.complete.call_args.args[1].split("\n", 1)[1]
     assert json.loads(sent)["indicators"]["RSI"] is None
+    assert json.loads(sent)["technical_facts"] == payload["technical_facts"]
     assert "NaN" not in sent
 
 

@@ -24,6 +24,7 @@ task1_financial/
   prompts.py                   separate system/user prompts
   sentiment.py                 per-headline calls and aggregation
   recommendation.py            latest indicator evidence and retries
+  technical_facts.py           deterministic indicator relationships
   json_utils.py                strict JSON conversion
   report.py                    Markdown, styled HTML and PNG chart
   tests/                       deterministic pytest suite
@@ -61,11 +62,13 @@ Phase 3 validation (2026-10-07): all 105 tests passed, including the original 73
 
 ## Running the notebook
 
-Run `jupyter notebook task1_financial/task1_financial.ipynb` from the root. In Colab, open the notebook from your public GitHub repository. In the setup cell, paste your actual repository URL if it cannot locate an existing checkout; the cell clones into the current runtime directory and installs `requirements.txt`. Run all cells in order. NVDA and a dynamic `2y` period are defaults. Outputs are deliberately unexecuted in the committed notebook.
+Run `jupyter notebook task1_financial/task1_financial.ipynb` from the root. In Colab, open the notebook from your public GitHub repository. In the setup cell, paste your actual repository URL if it cannot locate an existing checkout; the cell clones into the current runtime directory and installs `requirements.txt`. Use an updated checkout/fresh runtime and run all cells in order. NVDA and a dynamic `2y` period are defaults. Saved outputs must reflect actual execution; no market or LLM results are fabricated.
 
-For Task 1B, set `GROQ_API_KEY` and `GROQ_MODEL` in the runtime environment or Colab Secrets and grant notebook access. The appended setup cell also supports hidden key input. Select a Groq model supporting JSON object mode; no model identifier is hardcoded. `.env.example` shows variable names, but `.env` files are not automatically loaded. There is one LLM request per available headline and at most three recommendation attempts; provider usage limits apply.
+For Task 1B, set `GROQ_API_KEY` and `GROQ_MODEL` in the runtime environment or Colab Secrets and grant notebook access. The setup cell also supports hidden key input. Select a Groq model supporting JSON object mode; no model identifier is hardcoded. `.env.example` shows variable names, but `.env` files are not automatically loaded. Every retrieved headline is analyzed, with successful/failed coverage visible. The recommendation combines latest indicators, compact derived relationships and aggregate sentiment; no historical OHLCV table is sent. The notebook demonstrates invalid-output rejection offline and controlled invalid-ticker failure through the production pipeline. Response validation and transient transport retries are bounded; provider usage limits apply.
 
 Reports generated from actual pipeline results are saved under `task1_financial/outputs/` (ignored by Git). Download the HTML together with its PNG for the relative chart link. If Yahoo data is unavailable no report is generated; unavailable LLM analysis is explicitly marked rather than replaced with invented sentiment or a recommendation.
+
+Task 1 final quality validation (2026-10-07): 145 offline tests passed, with three new relationship tests and all 142 existing tests preserved. Task 1 lint/format, imports/compile, Python 3.11 syntax, notebook schema/cell syntax, rejection/robustness demos and Git whitespace checks passed. Production news returned ten real RSS headlines after Yahoo TLS failure. Live price/invalid-ticker requests failed in a controlled manner; Groq credentials were unavailable, so run the notebook in Colab for actual ten-headline sentiment, recommendation and report evidence. No live outputs or report artifacts were fabricated. Task 2 and Task 3 were not modified in this pass.
 
 See [Task 1 documentation](task1_financial/README.md) for formulas and limitations. Review [AI citations](CITATIONS.md) before submission. Reflection headings are intentionally left for the candidate.
 

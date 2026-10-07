@@ -94,3 +94,14 @@ Purpose: explicit writer clarification schema and targeted validation feedback; 
 Prompt: Preserve the Task 3 architecture and leave Task 2 untouched. Fix the live writer's null clarification_used loop without relaxing critique incorporation; reduce planner token pressure while retaining evidence IDs and autonomous selection; bound deterministic writer corrections separately from provider retries; reject unsupported financial-health/optimal-option claims and distinguish annualized volatility from 90-trading-day historical risk scaling. Add focused regressions and executable notebook checks without fabricated outputs.
 
 All AI-generated code must be reviewed, tested and understood by the candidate before submission.
+
+## Task 1 final quality pass
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose: audit existing indicators/news/sentiment/report flow; add deterministic technical relationships to the existing recommendation; deduplicate RSS before truncation; refine the single Task 1 notebook with visible validation/robustness and real-headline coverage; focused tests and documentation.
+
+Prompt: Refine Task 1 only without redesigning stable modules or touching Tasks 2/3. Preserve indicator formulas, adjusted-price/YTD choices, Groq/Pydantic validation and sentiment aggregation. Derive compact indicator confirmations/conflicts from existing values, include them in the recommendation, demonstrate malformed-output rejection offline and controlled invalid-ticker failure, verify the real Yahoo/RSS news flow and bonus artifacts, and validate the implementation without fabricated notebook results or personal reflections.
+
+All AI-generated code must be reviewed, tested and understood by the candidate before submission.

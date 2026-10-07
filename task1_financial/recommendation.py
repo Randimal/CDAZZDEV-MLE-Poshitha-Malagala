@@ -7,6 +7,7 @@ from task1_financial.llm import MAX_ATTEMPTS, CompletionClient, validated_comple
 from task1_financial.llm_models import SentimentAggregate, TechnicalRecommendation
 from task1_financial.models import PipelineResult
 from task1_financial.prompts import RECOMMENDATION_SYSTEM, recommendation_user
+from task1_financial.technical_facts import build_technical_facts
 
 INDICATOR_COLUMNS = (
     "SMA_50",
@@ -34,6 +35,9 @@ def recommendation_payload(
             "current_price": result.summary["current_price"],
             "indicators": {column: latest.get(column) for column in INDICATOR_COLUMNS},
             "deterministic_momentum": result.momentum.signal,
+            "technical_facts": build_technical_facts(
+                latest.to_dict(), momentum_signal=result.momentum.signal
+            ),
             "aggregate_news_sentiment": sentiment.model_dump() if sentiment else None,
         }
     )
@@ -46,7 +50,7 @@ def get_recommendation(
     *,
     attempts: int = MAX_ATTEMPTS,
 ) -> TechnicalRecommendation | None:
-    """Try at most three calls; unavailable output remains None, not HOLD."""
+    """Bound response-validation attempts; transport retries stay inside the client."""
     return validated_completion(
         client,
         RECOMMENDATION_SYSTEM,
