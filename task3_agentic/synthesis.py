@@ -16,10 +16,10 @@ from task1_financial.llm import (
     safe_provider_details,
 )
 from task3_agentic.prompts import SYNTHESIS_SYSTEM
-from task3_agentic.schemas import ResearchReport
+from task3_agentic.schemas import AgentAction, ResearchReport, WriterResearchReport
 from task3_agentic.state import AgentState, compact_schema, observation_view
 from task3_agentic.tracing import event, redact
-from task3_agentic.validation import safe_validation_feedback
+from task3_agentic.validation import grounding_facts, safe_validation_feedback
 
 SYNTHESIS_ATTEMPTS = 2
 
@@ -29,20 +29,39 @@ def final_synthesis(
     state: AgentState,
     as_of: date,
     validate: Callable[[BaseModel, AgentState, date], None],
+    *,
+    initial_output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """No tools or planner loop are reachable from this synthesis node."""
     role = state["role"]
+    writer = state["stage"] == "writer_final"
+    schema = WriterResearchReport if writer else ResearchReport
     payload = redact(
         {
-            "stage": "final_synthesis",
+            "stage": "writer_final" if writer else "final_synthesis",
             "query": state["query"],
             "ticker": state["ticker"],
             "as_of": as_of,
-            "report_schema": compact_schema(ResearchReport.model_json_schema()),
+            "finish_output_schema" if writer else "report_schema": compact_schema(
+                schema.model_json_schema()
+            ),
             "allowed_evidence_ids": [
                 item.evidence_id for item in state["observations"] if item.success
-            ],
+            ]
+            + (["analyst_brief", "analyst_clarification"] if writer else []),
             "observations": [observation_view(item) for item in state["observations"]],
+            "grounding_facts": grounding_facts(state["observations"], state["context"]),
+            **(
+                {
+                    "handoff_context": {
+                        key: value
+                        for key, value in state["context"].items()
+                        if key != "grounding_facts"
+                    },
+                }
+                if writer
+                else {}
+            ),
         }
     )
     trace = state["trace"] + [
@@ -52,24 +71,33 @@ def final_synthesis(
     ]
     json_mode = True
     feedback = ""
-    for attempt in range(1, SYNTHESIS_ATTEMPTS + 1):
+    attempts = 1 if writer and state["json_repairs"] else SYNTHESIS_ATTEMPTS
+    for attempt in range(1, attempts + 1):
+        # The writer's initial finish output is validated here. Its only repair
+        # stays inside this node and consumes no planner steps or tool calls.
+        supplied_output = writer and attempt == 1
         user = json_payload(payload)
-        trace.append(
-            event(
-                role,
-                "llm_request",
-                {
-                    "system": SYNTHESIS_SYSTEM,
-                    "user": payload,
-                    "prompt_chars": len(SYNTHESIS_SYSTEM) + len(user),
-                },
+        if not supplied_output:
+            trace.append(
+                event(
+                    role,
+                    "llm_request",
+                    {
+                        "system": SYNTHESIS_SYSTEM,
+                        "user": payload,
+                        "prompt_chars": len(SYNTHESIS_SYSTEM) + len(user),
+                    },
+                )
             )
-        )
         try:
             text = (
-                client.complete(SYNTHESIS_SYSTEM, user, json_mode=False)
-                if not json_mode and isinstance(client, GroqClient)
-                else client.complete(SYNTHESIS_SYSTEM, user)
+                ""
+                if supplied_output
+                else (
+                    client.complete(SYNTHESIS_SYSTEM, user, json_mode=False)
+                    if not json_mode and isinstance(client, GroqClient)
+                    else client.complete(SYNTHESIS_SYSTEM, user)
+                )
             )
         except Exception as exc:
             details = safe_provider_details(exc)
@@ -96,9 +124,26 @@ def final_synthesis(
                     "trace": trace,
                 }
         else:
-            trace.append(event(role, "llm_response", {"text": text}))
+            if not supplied_output:
+                trace.append(event(role, "llm_response", {"text": text}))
             try:
-                output = parse_output(text, ResearchReport)
+                if supplied_output:
+                    output = schema.model_validate(redact(initial_output))
+                else:
+                    try:
+                        output = parse_output(text, schema)
+                    except ValidationError as report_error:
+                        if not writer:
+                            raise
+                        # Accept the existing finish envelope as well as the
+                        # requested report object, with both schemas enforced.
+                        try:
+                            action = parse_output(text, AgentAction)
+                        except ValidationError:
+                            raise report_error
+                        if action.kind != "finish":
+                            raise ValueError("Report repair cannot invoke tools")
+                        output = schema.model_validate(action.output)
             except ValidationError as exc:
                 feedback, category = safe_validation_feedback(exc), "schema_validation"
             except (ValueError, TypeError):
@@ -111,7 +156,7 @@ def final_synthesis(
                     feedback, category = safe_validation_feedback(exc), "grounding"
                 else:
                     return {
-                        "output": output,
+                        "output": ResearchReport.model_validate(output.model_dump()),
                         "trace": trace
                         + [event(role, "stage_output", output.model_dump(mode="json"))],
                     }
@@ -122,9 +167,9 @@ def final_synthesis(
                 {"reason": feedback, "category": category, "attempt": attempt},
             )
         )
-        payload = {**payload, "repair_feedback": feedback}
+        payload = {**payload, "repair_feedback": feedback, "feedback": feedback}
     return {
         "output": None,
-        "error": f"Final synthesis validation exhausted: {feedback}; no fabricated report",
+        "error": f"{'Writer output' if writer else 'Final synthesis'} validation exhausted: {feedback}; no fabricated report",
         "trace": trace,
     }

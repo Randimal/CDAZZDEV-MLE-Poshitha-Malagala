@@ -48,8 +48,8 @@ and metric, or explain unavailability. For writer_final explicitly incorporate
 the answer in clarification_used and cite analyst_clarification where used.
 For writer_final clarification_used MUST be a non-empty string copied VERBATIM
 from handoff_context.clarification.answer (not null); citations alone are insufficient.
-Validation feedback names the failed field: correct it in the next finish action
-using existing evidence rather than refetching data. Writer output attempts are bounded.
+Validation feedback names the failed field. Writer report validation permits only
+one targeted synthesis repair using existing evidence, never additional tool calls.
 Role restrictions are enforced by code, not just these instructions."""
 
 SINGLE_PLANNER_SYSTEM = """You are the research planner in a LangGraph loop.
@@ -69,7 +69,9 @@ When a source fails, try another reasonable approach; never fabricate observatio
 Respect role restrictions and the remaining planning budget."""
 
 SYNTHESIS_SYSTEM = """Write a financial research report from the supplied evidence
-digest. Return a JSON object matching report_schema, not an agent action.
+digest. Return a JSON object matching report_schema (writer: finish_output_schema),
+not an agent action. When a clarification handoff exists, clarification_used must
+copy handoff_context.clarification.answer verbatim and cite analyst_clarification.
 Use only supplied evidence and successful allowed_evidence_ids. Exactly three
 90-day share-price risks need supporting evidence and valid evidence IDs. The hedge
 must cite quantitative evidence and state execution limitations. Summarize market/
@@ -98,10 +100,32 @@ to its canonical name, explain why it matters, and phrase your own specific ques
 For analyst_clarify, sentiment_score requests require analysis of the supplied real
 available_headlines via llm_sentiment, or disclosure that analysis is unavailable.
 The structured response must copy the exact requested metric/path from observations.
+For sentiment clarification, include actual successful/total/failed coverage and
+positive/negative/neutral counts in the answer, not just the overall score.
 For writer_final, incorporate the returned answer and quantitative/sentiment evidence
 without claiming sentiment confidence is calibrated. Do not invent financial facts.
 Never claim an option premium is attractive or implied volatility cheap/expensive
 without an actual option chain (not available in this workflow)."""
+
+FINANCIAL_GROUNDING = """
+Use grounding_facts for numeric interpretation and coverage. Its
+historical_90_trading_day_sigma_pct is ALREADY the approximate historical
+90-trading-day one-standard-deviation return scale: do not scale or divide again.
+For example 37.96% annualized * sqrt(90/252) is approximately 22.7%, not 5%.
+This historical scale is not a forecast or guaranteed expected move.
+Sentiment total includes failures: report successful_count of total_headline_count
+successfully analyzed, with failed_count separately; failures are never neutral.
+Do not assert historical/sector PE premiums, discounts, cheapness or expensiveness:
+no PE benchmarks have been retrieved. A supplied PE value alone is permissible.
+Choose a hedge concept, never arbitrary numerical hedge ratios, stop-loss percentages,
+strikes, option prices or implied-volatility valuations. Exact index/sector sizing
+requires unavailable beta/correlation/exposure objectives; put/collar execution
+requires option-chain quotes. Historical risk magnitude does not determine hedge size.
+Do not claim ticker-specific futures exist without instrument evidence; generic
+index/sector futures or ETF concepts need instrument and suitability verification.
+"""
+
+SYNTHESIS_SYSTEM += FINANCIAL_GROUNDING
 
 TOOL_DESCRIPTIONS = {
     "get_price_data": "Daily adjusted OHLCV, indicators and summary; ticker, period (2y/5y/10y/max).",

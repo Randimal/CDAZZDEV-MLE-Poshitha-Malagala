@@ -17,6 +17,7 @@ from task3_agentic.schemas import (
 )
 from task3_agentic.state import MultiState
 from task3_agentic.tracing import event
+from task3_agentic.validation import grounding_facts
 
 
 class TwoAgentResearch:
@@ -125,6 +126,9 @@ class TwoAgentResearch:
                     "brief": state["brief"].model_dump(),
                     "clarification": state["clarification"].model_dump(),
                     "request": state["critique_request"].model_dump(),
+                    "grounding_facts": grounding_facts(
+                        state["analyst_observations"], {}
+                    ),
                 },
                 observations=state["writer_observations"],
             )

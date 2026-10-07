@@ -40,21 +40,22 @@ def test_writer_clarification_feedback_then_valid_report(executor, tmp_path, inv
         for item in run.trace
         if item.event == "output_rejected"
     )
-    # Repair uses retained evidence; it adds one planning call and no tools.
+    # Repair uses retained evidence; it adds one synthesis call and no tools.
     assert executor.counter == 4
+    assert sum(item.event == "decision" for item in run.trace) == 8
 
 
 def test_writer_validation_retries_are_bounded(executor, tmp_path):
     responses, _ = multi_responses(executor)
     bad = deepcopy(responses[-1])
     bad["output"]["clarification_used"] = None
-    client = ScriptedClient(responses[:-1] + [bad] * 3)
+    client = ScriptedClient(responses[:-1] + [bad] * 2)
     run = TwoAgentResearch(
         AgentRuntime(client, executor), PersistentMemory(tmp_path)
     ).run(as_of=AS_OF)
     assert run.report is None and "Writer output validation exhausted" in run.error
     assert "clarification_used" in run.error
-    assert sum(request["stage"] == "writer_final" for request in client.requests) == 4
+    assert sum(request["stage"] == "writer_final" for request in client.requests) == 3
 
 
 @pytest.mark.parametrize(

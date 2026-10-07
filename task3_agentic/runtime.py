@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from task1_financial.json_utils import json_safe
 from task1_financial.llm import (
     CompletionClient,
+    GroqClient,
     LLMTransportError,
     error_category,
     parse_output,
@@ -21,6 +22,7 @@ from task1_financial.llm import (
 from task3_agentic.prompts import (
     AGENT_SYSTEM,
     CRITIQUE_INSTRUCTIONS,
+    FINANCIAL_GROUNDING,
     SINGLE_PLANNER_SYSTEM,
     TOOL_DESCRIPTIONS,
 )
@@ -50,13 +52,14 @@ from task3_agentic.tracing import event, redact
 from task3_agentic.validation import (
     GroundingError,
     annualized_values,
+    grounding_facts,
     safe_validation_feedback,
     validate_report_language,
+    validate_sentiment_counts,
 )
 
 DEFAULT_DECISION_BUDGET = 12
 MAX_UNCLASSIFIED_TRANSPORT_FAILURES = 2
-MAX_WRITER_OUTPUT_FAILURES = 3
 
 
 def evidence_coverage(state: AgentState) -> dict[str, bool]:
@@ -144,6 +147,30 @@ def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
             if output.metric.name != request["requested_metric"]:
                 raise GroundingError("metric.name: must match request.requested_metric")
             validate_metric(output.metric, observations)
+        if request["requested_metric"] == "sentiment_score":
+            attempts = [
+                item for item in observations if item.tool_name == "llm_sentiment"
+            ]
+            if not attempts:
+                raise GroundingError(
+                    "metric: sentiment_score requires an actual llm_sentiment call on supplied headlines"
+                )
+            if (
+                any(
+                    item.success
+                    and item.output["aggregate"]["overall_score"] is not None
+                    for item in attempts
+                )
+                and output.metric is None
+            ):
+                raise GroundingError(
+                    "metric: copy the available validated sentiment_score; do not replace it with null"
+                )
+            validate_sentiment_counts(
+                "answer",
+                output.answer,
+                grounding_facts(observations, context)["sentiment"],
+            )
     elif isinstance(output, ResearchReport):
         if output.ticker != state["ticker"] or output.as_of != as_of:
             raise GroundingError(
@@ -198,7 +225,11 @@ def validate_output(output: BaseModel, state: AgentState, as_of: date) -> None:
             raise GroundingError(
                 "hedge_strategy_recommendation.evidence_ids: must cite quantitative price/volatility or validated analyst evidence"
             )
-        validate_report_language(output, annualized_values(observations, context))
+        validate_report_language(
+            output,
+            annualized_values(observations, context),
+            grounding_facts(observations, context),
+        )
 
 
 class AgentRuntime:
@@ -234,6 +265,7 @@ class AgentRuntime:
         )
         if stage == "writer_final":
             output_schema = WriterResearchReport
+            system += FINANCIAL_GROUNDING
 
         def decide(state: AgentState) -> dict[str, Any]:
             if state["steps"] >= self.max_decisions:
@@ -288,7 +320,14 @@ class AgentRuntime:
                     ]
                     if "llm_sentiment" in allowed
                     else [],
-                    "handoff_context": state["context"],
+                    "handoff_context": {
+                        key: value
+                        for key, value in state["context"].items()
+                        if key != "grounding_facts"
+                    },
+                    "grounding_facts": grounding_facts(
+                        state["observations"], state["context"]
+                    ),
                     "feedback": state["feedback"],
                 }
             )
@@ -315,30 +354,62 @@ class AgentRuntime:
             try:
                 text = self.client.complete(system, user)
             except Exception as exc:
-                category = error_category(exc)
-                trace.append(
-                    event(
-                        role,
-                        "llm_failure",
-                        {"category": category, **safe_provider_details(exc)},
+                if (
+                    stage in {"analyst_clarify", "writer_final"}
+                    and isinstance(self.client, GroqClient)
+                    and isinstance(exc, LLMTransportError)
+                    and exc.status_code == 400
+                    and exc.error_code == "json_validate_failed"
+                    and state["json_repairs"] == 0
+                ):
+                    # This is an application JSON repair, not a transport retry
+                    # or another planning step. The graph still executes tools.
+                    state = {**state, "json_repairs": 1}
+                    payload = {
+                        **payload,
+                        "feedback": "output: provider rejected JSON generation; return one valid JSON action object matching action_schema. Finish output must match finish_output_schema; use exact supplied metric values.",
+                    }
+                    user = json.dumps(
+                        json_safe(payload), allow_nan=False, separators=(",", ":")
                     )
-                )
-                failures = state["transport_failures"] + 1
-                # GroqClient has already exhausted its bounded transport backoff.
-                # An injected legacy client has a separate two-failure safety bound.
-                terminal = (
-                    isinstance(exc, (LLMTransportError, ValueError))
-                    or failures >= MAX_UNCLASSIFIED_TRANSPORT_FAILURES
-                )
-                if not terminal:
-                    time.sleep(1.0)
-                return {
-                    "transport_failures": failures,
-                    "decision": None,
-                    "trace": trace,
-                    "error": f"LLM transport stopped: {category}" if terminal else None,
-                    "feedback": f"LLM transport failure category={category}.",
-                }
+                    trace += [
+                        event(
+                            role,
+                            "llm_failure",
+                            {"category": "provider_json", **safe_provider_details(exc)},
+                        ),
+                        event(
+                            role,
+                            "llm_request",
+                            {
+                                "system": system,
+                                "user": payload,
+                                "json_mode": False,
+                                "prompt_chars": len(system) + len(user),
+                            },
+                        ),
+                    ]
+                    try:
+                        text = self.client.complete(system, user, json_mode=False)
+                    except Exception as repair_exc:
+                        return {
+                            "json_repairs": 1,
+                            "decision": None,
+                            "error": f"JSON repair stopped: {error_category(repair_exc)}; no fabricated output",
+                            "trace": trace
+                            + [
+                                event(
+                                    role,
+                                    "llm_failure",
+                                    {
+                                        "category": error_category(repair_exc),
+                                        **safe_provider_details(repair_exc),
+                                    },
+                                )
+                            ],
+                        }
+                else:
+                    return transport_failure(state, trace, exc)
             try:
                 trace.append(event(role, "llm_response", {"text": text}))
                 action = parse_output(text, action_schema)
@@ -360,31 +431,58 @@ class AgentRuntime:
                     )
                     return {
                         "steps": state["steps"] + 1,
+                        "json_repairs": state["json_repairs"],
                         "decision": None,
                         "trace": trace,
-                        "feedback": "This exact tool call already failed and is blocked. "
-                        "Choose another source/tool or change the arguments.",
+                        "feedback": "This exact tool call already failed and is blocked. Choose another source/tool or change the arguments.",
                     }
                 return {
                     "steps": state["steps"] + 1,
+                    "json_repairs": state["json_repairs"],
                     "decision": action,
                     "feedback": None,
                     "trace": trace,
                 }
             except Exception as exc:
-                trace.append(
-                    event(
-                        role,
-                        "llm_failure",
-                        {"category": "validation"},
-                    )
-                )
+                trace.append(event(role, "llm_failure", {"category": "validation"}))
                 return {
                     "steps": state["steps"] + 1,
+                    "json_repairs": state["json_repairs"],
                     "decision": None,
                     "trace": trace,
                     "feedback": safe_validation_feedback(exc),
+                    "error": "JSON repair validation exhausted; no fabricated output"
+                    if state["json_repairs"]
+                    else None,
                 }
+
+        def transport_failure(
+            state: AgentState, trace: list[TraceEvent], exc: Exception
+        ) -> dict[str, Any]:
+            category = error_category(exc)
+            trace.append(
+                event(
+                    role,
+                    "llm_failure",
+                    {"category": category, **safe_provider_details(exc)},
+                )
+            )
+            failures = state["transport_failures"] + 1
+            # GroqClient has already exhausted its bounded transport backoff.
+            # An injected legacy client has a separate two-failure safety bound.
+            terminal = (
+                isinstance(exc, (LLMTransportError, ValueError))
+                or failures >= MAX_UNCLASSIFIED_TRANSPORT_FAILURES
+            )
+            if not terminal:
+                time.sleep(1.0)
+            return {
+                "transport_failures": failures,
+                "decision": None,
+                "trace": trace,
+                "error": f"LLM transport stopped: {category}" if terminal else None,
+                "feedback": f"LLM transport failure category={category}.",
+            }
 
         def call_tool(state: AgentState) -> dict[str, Any]:
             action = state["decision"]
@@ -435,6 +533,14 @@ class AgentRuntime:
             }
 
         def finish(state: AgentState) -> dict[str, Any]:
+            if stage == "writer_final":
+                return final_synthesis(
+                    self.client,
+                    state,
+                    as_of,
+                    validate_output,
+                    initial_output=state["decision"].output,
+                )
             try:
                 if separate_synthesis:
                     if not all(evidence_coverage(state).values()):
@@ -462,9 +568,8 @@ class AgentRuntime:
                 return {
                     "feedback": feedback,
                     "output_failures": failures,
-                    "error": f"Writer output validation exhausted: {feedback}"
-                    if stage == "writer_final"
-                    and failures >= MAX_WRITER_OUTPUT_FAILURES
+                    "error": f"JSON repair validation exhausted: {feedback}; no fabricated output"
+                    if state["json_repairs"]
                     else None,
                     "trace": state["trace"]
                     + [
@@ -531,6 +636,7 @@ class AgentRuntime:
             "stage": stage,
             "steps": 0,
             "transport_failures": 0,
+            "json_repairs": 0,
             "output_failures": 0,
             "failed_calls": [
                 tool_call_key(item.tool_name, item.arguments)

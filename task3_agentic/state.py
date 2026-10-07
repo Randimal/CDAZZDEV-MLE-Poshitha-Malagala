@@ -28,6 +28,7 @@ class AgentState(TypedDict):
     stage: str
     steps: int
     transport_failures: int
+    json_repairs: int
     failed_calls: list[str]
     output_failures: int
     decision: AgentAction | ResearchDecision | None
