@@ -19,8 +19,8 @@ from task1_financial.json_utils import json_safe
 from task1_financial.llm import CompletionClient
 from task1_financial.models import NewsHeadline, PipelineResult
 from task1_financial.news import fetch_news
-from task1_financial.sentiment import analyze_headlines
 from task3_agentic.schemas import Role, ToolObservation
+from task3_agentic.sentiment import TASK3_HEADLINE_LIMIT, analyze_batch
 from task3_agentic.tracing import ToolTracer, redact
 
 TRADING_DAYS_PER_YEAR = 252
@@ -114,10 +114,12 @@ class FinancialTools:
             }
         )
 
-    def get_news(self, ticker: str, n: int = 10) -> dict[str, Any]:
+    def get_news(self, ticker: str, n: int = TASK3_HEADLINE_LIMIT) -> dict[str, Any]:
+        if not 1 <= n <= TASK3_HEADLINE_LIMIT:
+            raise ValueError("Task 3 news requests must contain 1–10 headlines")
         ticker = normalize_ticker(ticker)
         items = fetch_news(
-            self.news_client_factory(ticker), count=max(10, n), ticker=ticker
+            self.news_client_factory(ticker), count=TASK3_HEADLINE_LIMIT, ticker=ticker
         )[:n]
         self.known_headlines.update({item.title: item for item in items})
         return {"ticker": ticker, "headlines": [asdict(item) for item in items]}
@@ -149,11 +151,13 @@ class FinancialTools:
         }
 
     def llm_sentiment(self, headlines: list[dict[str, Any]]) -> dict[str, Any]:
+        if not 1 <= len(headlines) <= TASK3_HEADLINE_LIMIT:
+            raise ValueError("Task 3 sentiment requires 1–10 retrieved headlines")
         titles = [item.get("title") for item in headlines]
         if not titles or any(title not in self.known_headlines for title in titles):
             raise ValueError("Use only supplied or previously retrieved headlines")
         items = [self.known_headlines[title] for title in dict.fromkeys(titles)]
-        return analyze_headlines(self.ticker, items, self.client).model_dump()
+        return analyze_batch(self.ticker, items, self.client).model_dump()
 
     def web_search(self, query: str) -> dict[str, Any]:
         results = []
@@ -190,7 +194,7 @@ class PriceArguments(Arguments):
 
 class NewsArguments(Arguments):
     ticker: str
-    n: int = Field(default=10, ge=1, le=50)
+    n: int = Field(default=TASK3_HEADLINE_LIMIT, ge=1, le=TASK3_HEADLINE_LIMIT)
 
 
 class VolatilityArguments(Arguments):
@@ -199,7 +203,9 @@ class VolatilityArguments(Arguments):
 
 
 class SentimentArguments(Arguments):
-    headlines: list[dict[str, Any]] = Field(min_length=1, max_length=50)
+    headlines: list[dict[str, Any]] = Field(
+        min_length=1, max_length=TASK3_HEADLINE_LIMIT
+    )
 
 
 class SearchArguments(Arguments):

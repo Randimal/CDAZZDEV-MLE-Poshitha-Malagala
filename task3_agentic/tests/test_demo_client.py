@@ -8,7 +8,12 @@ import pytest
 from task1_financial.llm import GroqClient, LLMTransportError
 from task1_financial.prompts import SENTIMENT_SYSTEM
 from task1_financial.tests.test_transport import status_error
-from task3_agentic.demo_client import DemoPacer, Task3GroqClient, TokenBudgets
+from task3_agentic.demo_client import (
+    REQUEST_INTERVAL_SECONDS,
+    DemoPacer,
+    Task3GroqClient,
+    TokenBudgets,
+)
 from task3_agentic.prompts import FOLLOWUP_SYSTEM
 from task3_agentic.runtime import AgentRuntime
 from task3_agentic.schemas import (
@@ -43,6 +48,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Task3GroqClient:
         ("final_synthesis", "synthesis", 1800),
         (None, FOLLOWUP_SYSTEM, 640),
         (None, SENTIMENT_SYSTEM, 384),
+        ("sentiment_batch", "batch sentiment", 1800),
     ],
 )
 def test_request_budgets_preserve_larger_handoffs_and_reports(
@@ -240,7 +246,7 @@ def inject_pacing(client, *, enabled):
     client._clock, client._sleep = clock, clock.sleep
     client.request_pacer = DemoPacer(
         enabled=enabled,
-        window_seconds=35,
+        window_seconds=REQUEST_INTERVAL_SECONDS,
         clock=clock,
         sleep=clock.sleep,
         announce=announce,
@@ -254,11 +260,12 @@ def test_intra_workflow_pacing_waits_remaining_interval(client):
     assert clock.waits == []  # No initial delay.
     clock.now += 3.6
     client.complete("critique", '{"stage":"writer_review"}')
-    assert clock.waits == [pytest.approx(31.4)]
-    assert client.last_completed_at == 135.0 and client.call_count == 2
+    assert REQUEST_INTERVAL_SECONDS == 60
+    assert clock.waits == [pytest.approx(56.4)]
+    assert client.last_completed_at == 160.0 and client.call_count == 2
     announce.assert_called_once()
     assert "intra-workflow pacing" in announce.call_args.args[0]
-    assert "31.4s" in announce.call_args.args[0]
+    assert "56.4s" in announce.call_args.args[0]
 
 
 def test_client_pacing_defaults_disabled_and_can_be_disabled_for_higher_quotas(client):
@@ -292,7 +299,7 @@ def test_retry_after_remains_authoritative_with_request_pacing_enabled(client):
     assert clock.waits == [7]
     assert client.last_completed_at == 107
     client.complete("planner", '{"stage":"single_research"}')
-    assert clock.waits == [7, 35]
+    assert clock.waits == [7, 60]
 
 
 def test_provider_json_fallback_also_observes_request_pacing(client):
@@ -300,5 +307,5 @@ def test_provider_json_fallback_also_observes_request_pacing(client):
     create = client._client.chat.completions.create
     create.side_effect = [json_generation_error(), create.return_value]
     client.complete("planner", '{"stage":"single_research"}')
-    assert clock.waits == [35]
+    assert clock.waits == [60]
     assert client.call_count == 1 and create.call_count == 2

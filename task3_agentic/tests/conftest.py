@@ -134,10 +134,14 @@ def services(prices_result: PipelineResult) -> FinancialTools:
     client = Mock()
     client.complete.return_value = json.dumps(
         {
-            "headline": "Demand concern",
-            "sentiment": "negative",
-            "confidence": 0.8,
-            "brief_reason": "Demand uncertainty",
+            "results": [
+                {
+                    "headline": "Demand concern",
+                    "sentiment": "negative",
+                    "confidence": 0.8,
+                    "brief_reason": "Demand uncertainty",
+                }
+            ],
         }
     )
     news_client = Mock()

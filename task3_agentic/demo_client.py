@@ -25,7 +25,7 @@ from task3_agentic.prompts import FOLLOWUP_SYSTEM
 logger = logging.getLogger(__name__)
 MAX_COMPLETION_TOKENS = 4096
 TOKEN_WINDOW_SECONDS = 60.0
-REQUEST_INTERVAL_SECONDS = 35.0
+REQUEST_INTERVAL_SECONDS = 60.0
 CONTROLLED_DEMO_DECISIONS = 3
 # Send optional reasoning parameters only to verified supported models/SDKs.
 LOW_MEDIUM_REASONING_MODELS = frozenset({"openai/gpt-oss-20b", "openai/gpt-oss-120b"})
@@ -41,6 +41,7 @@ class TokenBudgets:
     clarification: int = 900
     followup: int = 640
     sentiment: int = 384
+    sentiment_batch: int = 1800  # Up to ten item records, including copied titles.
     report: int = 1800
 
     def __post_init__(self) -> None:
@@ -71,6 +72,7 @@ def request_profile(system: str, user: str) -> str:
         "analyst_clarify": "clarification",
         "writer_final": "report",
         "final_synthesis": "report",
+        "sentiment_batch": "sentiment_batch",
     }.get(stage, "report")
 
 
