@@ -25,6 +25,7 @@ from task3_agentic.prompts import FOLLOWUP_SYSTEM
 logger = logging.getLogger(__name__)
 MAX_COMPLETION_TOKENS = 4096
 TOKEN_WINDOW_SECONDS = 60.0
+REQUEST_INTERVAL_SECONDS = 35.0
 CONTROLLED_DEMO_DECISIONS = 3
 # Send optional reasoning parameters only to verified supported models/SDKs.
 LOW_MEDIUM_REASONING_MODELS = frozenset({"openai/gpt-oss-20b", "openai/gpt-oss-120b"})
@@ -80,25 +81,42 @@ class Task3GroqClient(GroqClient):
     No model switch, new credentials, hidden retries or TLS override is introduced.
     """
 
+    handles_provider_json_fallback = True
+
     def __init__(
         self,
         *,
         budgets: TokenBudgets | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        free_tier_pacing: bool = False,
+        request_interval_seconds: float = REQUEST_INTERVAL_SECONDS,
+        announce: Callable[[str], None] = logger.info,
     ) -> None:
         self.budgets = budgets or TokenBudgets()
         super().__init__(max_completion_tokens=self.budgets.report)
         self.call_count = 0
         self.last_completed_at: float | None = None
         self._clock, self._sleep = clock, sleep
+        self.request_pacer = DemoPacer(
+            enabled=free_tier_pacing,
+            window_seconds=request_interval_seconds,
+            clock=clock,
+            sleep=sleep,
+            announce=announce,
+        )
         self._supports_reasoning = (
             self.model in LOW_MEDIUM_REASONING_MODELS
             and "reasoning_effort" in inspect.signature(Completions.create).parameters
         )
 
     def complete(self, system: str, user: str, *, json_mode: bool = True) -> str:
-        """Keep bounded transport retries/Retry-After separate from demo pacing."""
+        """One provider JSON fallback; local parsing/validation stays with callers.
+
+        A provider's rejection of JSON generation is distinct from malformed
+        returned text or local schema failures. Only HTTP 400/json_validate_failed
+        changes response mode; transient errors retain existing transport backoff.
+        """
         profile = request_profile(system, user)
         budget = getattr(self.budgets, profile)
         options = {}
@@ -112,7 +130,38 @@ class Task3GroqClient(GroqClient):
         )
         self.call_count += 1
         try:
-            for attempt in range(TRANSPORT_ATTEMPTS):
+            return self._request(system, user, json_mode, budget, options)
+        except LLMTransportError as exc:
+            if not (
+                json_mode
+                and exc.status_code == 400
+                and exc.error_code == "json_validate_failed"
+            ):
+                raise
+            logger.warning(
+                "Task3 provider JSON fallback status=400 code=json_validate_failed attempt=1/1"
+            )
+            repair_system = system + (
+                "\nProvider JSON generation was rejected. Return exactly one valid "
+                "JSON object matching the supplied schema. No Markdown fences or "
+                "surrounding prose; do not invent fields, actions or evidence."
+            )
+            # This call cannot fall back recursively. Its transport may still
+            # honor Retry-After on actual transient errors, bounded as before.
+            return self._request(repair_system, user, False, budget, options)
+
+    def _request(
+        self,
+        system: str,
+        user: str,
+        json_mode: bool,
+        budget: int,
+        options: dict[str, str],
+    ) -> str:
+        """Pace generation requests; provider backoff controls transport retries."""
+        self.request_pacer.before_request(self.last_completed_at)
+        for attempt in range(TRANSPORT_ATTEMPTS):
+            try:
                 try:
                     response = self._client.chat.completions.create(
                         model=self.model,
@@ -127,43 +176,44 @@ class Task3GroqClient(GroqClient):
                         max_completion_tokens=budget,
                         **options,
                     )
-                    content = response.choices[0].message.content
-                    if not isinstance(content, str):
-                        raise ValueError("Provider returned no text")
-                    return content
-                except Exception as exc:
-                    category = error_category(exc)
-                    details = safe_provider_details(exc)
-                    delay = retry_delay(exc, attempt)
-                    retry = (
-                        category in {"rate_limit", "timeout", "connection"}
-                        and attempt + 1 < TRANSPORT_ATTEMPTS
-                        and delay <= MAX_RETRY_WAIT_SECONDS
-                    )
-                    logger.warning(
-                        "LLM category=%s status=%s code=%s attempt=%d/%d retry=%s",
-                        category,
-                        details["status_code"],
-                        details["error_code"],
-                        attempt + 1,
-                        TRANSPORT_ATTEMPTS,
-                        retry,
-                    )
-                    if not retry:
-                        raise LLMTransportError(category, **details) from None
-                    self._sleep(delay)
-            raise AssertionError("Bounded transport must return or raise")
-        finally:
-            # Failed requests may consume quota too; section pacing follows either.
-            self.last_completed_at = self._clock()
+                finally:
+                    # Failed requests can consume quota. Both pacers share this
+                    # timestamp; neither pacing nor transport sleeps update it.
+                    self.last_completed_at = self._clock()
+                content = response.choices[0].message.content
+                if not isinstance(content, str):
+                    raise ValueError("Provider returned no text")
+                return content
+            except Exception as exc:
+                category = error_category(exc)
+                details = safe_provider_details(exc)
+                delay = retry_delay(exc, attempt)
+                retry = (
+                    category in {"rate_limit", "timeout", "connection"}
+                    and attempt + 1 < TRANSPORT_ATTEMPTS
+                    and delay <= MAX_RETRY_WAIT_SECONDS
+                )
+                logger.warning(
+                    "LLM category=%s status=%s code=%s attempt=%d/%d retry=%s",
+                    category,
+                    details["status_code"],
+                    details["error_code"],
+                    attempt + 1,
+                    TRANSPORT_ATTEMPTS,
+                    retry,
+                )
+                if not retry:
+                    raise LLMTransportError(category, **details) from None
+                self._sleep(delay)
+        raise AssertionError("Bounded transport must return or raise")
 
 
 class DemoPacer:
-    """Free-tier pacing between independent demonstration sections only.
+    """Optional free-tier pacing at notebook sections or request boundaries.
 
     Wait the remaining part of one minute since the last completion, not a full
     minute unconditionally. This is conservative demo spacing, not a quota grant:
-    other clients and requests within a workflow can still hit provider limits.
+    other clients and unusually large requests can still hit provider limits.
     """
 
     def __init__(
@@ -181,14 +231,24 @@ class DemoPacer:
         self._clock, self._sleep, self._announce = clock, sleep, announce
 
     def before_section(self, section: str, last_completed_at: float | None) -> float:
+        return self._wait(
+            last_completed_at,
+            "Groq free-tier pacing enabled — waiting {wait:.1f}s for the next "
+            f"token window before {section}. Free-tier pacing between independent "
+            "demonstration sections; provider Retry-After remains authoritative.",
+        )
+
+    def before_request(self, last_completed_at: float | None) -> float:
+        return self._wait(
+            last_completed_at,
+            "Groq free-tier intra-workflow pacing — waiting {wait:.1f}s before next LLM request.",
+        )
+
+    def _wait(self, last_completed_at: float | None, message: str) -> float:
         if not self.enabled or last_completed_at is None:
             return 0.0
         wait = max(0.0, self.window_seconds - (self._clock() - last_completed_at))
         if wait:
-            self._announce(
-                f"Groq free-tier pacing enabled — waiting {wait:.1f}s for the next "
-                f"token window before {section}. Free-tier pacing between independent "
-                "demonstration sections; provider Retry-After remains authoritative."
-            )
+            self._announce(message.format(wait=wait))
             self._sleep(wait)
         return wait

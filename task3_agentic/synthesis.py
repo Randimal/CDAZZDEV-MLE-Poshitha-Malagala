@@ -113,6 +113,7 @@ def final_synthesis(
                 and exc.status_code == 400
                 and exc.error_code == "json_validate_failed"
                 and isinstance(client, GroqClient)
+                and not getattr(client, "handles_provider_json_fallback", False)
             ):
                 json_mode = False
                 feedback = "output: provider rejected JSON syntax; return one valid JSON object"

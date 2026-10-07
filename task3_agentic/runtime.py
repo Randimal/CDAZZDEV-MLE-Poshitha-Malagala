@@ -357,6 +357,9 @@ class AgentRuntime:
                 if (
                     stage in {"analyst_clarify", "writer_final"}
                     and isinstance(self.client, GroqClient)
+                    and not getattr(
+                        self.client, "handles_provider_json_fallback", False
+                    )
                     and isinstance(exc, LLMTransportError)
                     and exc.status_code == 400
                     and exc.error_code == "json_validate_failed"
