@@ -84,14 +84,14 @@ The notebook exposes sanitized messages/decisions/observations/handoffs, a follo
 ## Task 2A: policy-grounded compliance dataset
 
 Open [the single Task 2 notebook](task2_genai/task2_genai.ipynb) in Colab or locally.
-Task 2A requests 160 fictional internal-policy examples in batches of ten from
-`openai/gpt-oss-120b` via Groq, validates and globally deduplicates them, displays
+Task 2A requests 160 fictional internal-policy examples in batches of five from
+`openai/gpt-oss-120b` via Groq, resumes missing IDs from raw checkpoints, validates and globally deduplicates them, displays
 diversity, and produces seeded 80/10/10 chat splits only after retaining at least
 120 clean examples. The planned student is `Qwen/Qwen2.5-3B-Instruct`; no model is
 loaded or trained in this phase. Task 2B/2C remain pending.
 
 Use environment variables/Colab Secrets for Groq; default free-tier pacing is
-60 seconds between requests. Raw responses, clean records, audit summaries and
+65 seconds between requests with a 2,500-token completion budget. Raw responses, clean records, audit summaries and
 protected split manifests are saved under `task2_genai/data/` only from actual
 generation. No dataset or notebook outputs are fabricated. Download the real data
 and executed notebook after generation and manual grounding review. These fictional

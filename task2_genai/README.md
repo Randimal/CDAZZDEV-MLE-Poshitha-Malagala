@@ -29,9 +29,10 @@ logic; their implementation remains frozen.
 
 ## Generation and validation
 
-Default configuration requests **160 candidates in sixteen batches of ten** rather
-than one call per example. Batch sizes 10–20 are supported; use a candidate count
-divisible by the batch size to avoid a smaller final batch. Prefer ten on Groq Free.
+Default configuration keeps **160 planned candidates**, requesting missing IDs in
+batches of **five** rather than one call per example. Batch sizes 5–20 remain supported
+for different quotas; a final partial missing-ID batch may be smaller. Legacy
+ten-example checkpoints can be resumed using five-example batches.
 The plan balances fourteen topics (11–12 assignments each) and rotates low/medium/
 high risk. Hints vary anonymous customer types, amount bands, 25–95-word scenarios,
 ambiguity and policy style. The teacher receives five recent accepted scenarios
@@ -52,13 +53,16 @@ including at most one text-mode JSON fallback for a provider `400/json_validate_
 Only timeout, connection, rate-limit and server failures get transport backoff.
 Retry-After is respected; a wait longer than the 120-second retry budget fails the
 batch instead of retrying early. Deterministic parse/schema errors are not retried.
+Long rate-limit cooldowns also block later batch calls on the same client from
+retrying early. Token-budget truncation is an explicit `completion_truncated` failure;
+the actual model text remains in the raw audit and is not salvaged into examples.
 The SDK's automatic retries are disabled. Logs contain only safe categories,
 numeric status, batch/attempt numbers and counts, excluding raw responses/keys.
 
-Colab enables optional **60-second minimum request spacing**, 4,500 completion tokens
+Colab enables optional **65-second minimum request spacing**, 2,500 completion tokens
 and supported low reasoning effort for GPT-OSS. This limits, but cannot guarantee
-avoidance of, account-wide quota failures. Allow roughly 16 minutes plus response/
-retry time for the default generation. Higher-tier users can disable pacing; larger
+avoidance of, account-wide quota failures. With 20 existing successes, 140 missing
+IDs require at most 28 normal requests (roughly 30 minutes plus response/retry time). Higher-tier users can disable pacing; larger
 batches may need a larger completion budget and sufficient TPM allowance. Configure
 `GROQ_API_KEY` in environment/Colab Secrets; `.env` is ignored and is not auto-loaded.
 TLS verification stays enabled.
@@ -76,9 +80,12 @@ The notebook displays measured topic/category/risk counts, topic-by-risk coverag
 input and scenario word-length summaries/histograms, and duplicate statistics using
 pandas/matplotlib. Word lengths are transparent proxies; Qwen token lengths will be
 measured in Task 2B. At least **120 cleaned examples** are required before splitting.
-If fewer remain, actual partial raw/clean data is retained and split generation is
-blocked. Review failures/duplicates and generate another real run in a new directory;
-do not invent replacements or claim the minimum has been achieved.
+The preferred target is **130+ clean examples**, giving margin above the hard 120
+minimum. If fewer than 120 remain, partial raw/clean data is retained and splitting
+is blocked by both notebook and production split function. Resume unresolved IDs
+without deleting files; no accepted ID is regenerated to hide duplication or failure.
+If all IDs are valid but deduplication leaves too few unique cases, inspect the
+quality problem rather than fabricate replacements or claim the target was reached.
 
 Use fixed seed **42** and rounded **80/10/10** counts (e.g. 160 -> 128/16/16;
 120 -> 96/12/12). Prefer topic+risk stratification when both holdouts can represent
@@ -116,9 +123,22 @@ Default output directory: `task2_genai/data/`. Artifacts:
 - `train.jsonl`, `validation.jsonl`, `test.jsonl`: chat-format splits.
 - `split_manifest.json`: counts, strata, IDs, seed and SHA-256 artifact hashes.
 
-Completed saved clean data is reused without teacher calls. An interrupted raw-only
-run is protected rather than overwritten; inspect its responses before starting a
-new run directory. Existing splits are never overwritten. Keep the test set and its
+Resume defaults on in the notebook (`RESUME_GENERATION=True`). Journal replay uses
+the same per-example validation as fresh generation. It checks the seed, full prompt
+hash, teacher model and exact canonical assignments before any request/write. It
+retains the first valid example per ID, rejects duplicates, and requests only missing
+planned IDs. Changing batch size does not change the 160-ID plan. Results are merged
+in canonical ID order; existing clean records get priority during deduplication.
+Raw audit lines are appended/flushed with monotonically increasing batch IDs; old
+failures and all previous bytes remain intact. Incompatible/corrupt checkpoints
+stop without overwriting data. A missing raw journal for partial clean data must be
+restored, so accepted IDs cannot inadvertently be regenerated.
+
+The notebook prints `existing_valid`, `missing_before_resume`, `newly_generated`
+(newly validated), and `final_valid`; validation failure counts include historical
+audit entries, while missing counts reflect currently unresolved IDs. Completed
+checkpoints make zero teacher calls. Existing splits freeze generation and are never
+overwritten; their hashes and ID/scenario leakage are verified. Keep the test set and its
 manifest hash **untouched until Task 2C**, and do not use test answers during training,
 prompt selection or tuning. Download real artifacts and the executed notebook from
 Colab after reviewing their content; no example artifacts or notebook outputs are

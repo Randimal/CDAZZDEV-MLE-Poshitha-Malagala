@@ -99,3 +99,50 @@ def test_injected_pacing_does_not_delay_tests():
     now[0] += 10
     client.complete("JSON", "Generate")
     assert waits == [50]
+
+
+def test_five_example_token_budget_and_65_second_retry_after():
+    sdk = sdk_with(
+        [
+            ProviderError(429, headers={"retry-after": "70"}),
+            response('{"examples": []}'),
+            response('{"examples": []}'),
+        ]
+    )
+    now = [0.0]
+    waits = []
+
+    def sleep(seconds):
+        waits.append(seconds)
+        now[0] += seconds
+
+    client = GroqTeacherClient(
+        sdk=sdk, min_interval_seconds=65, clock=lambda: now[0], sleep=sleep
+    )
+    client.complete("JSON", "Generate five")
+    client.complete("JSON", "Generate five")
+    assert waits == [70, 65]
+    assert all(
+        call.kwargs["max_completion_tokens"] == 2500
+        for call in sdk.chat.completions.create.call_args_list
+    )
+
+
+def test_long_retry_after_prevents_early_calls_across_batches():
+    sdk = sdk_with([ProviderError(429, headers={"retry-after": "300"})])
+    client = GroqTeacherClient(sdk=sdk, sleep=lambda _: None, clock=lambda: 0.0)
+    for _ in range(2):
+        with pytest.raises(TeacherError, match="rate_limit"):
+            client.complete("JSON", "Generate five")
+    assert sdk.chat.completions.create.call_count == 1
+
+
+def test_token_truncation_is_explicit_and_raw_response_preserved(caplog):
+    value = response('{"examples": [')
+    value.choices[0].finish_reason = "length"
+    sdk = sdk_with([value])
+    with pytest.raises(TeacherError, match="completion_truncated") as caught:
+        GroqTeacherClient(sdk=sdk).complete("JSON", "Generate five")
+    assert caught.value.raw_response == '{"examples": ['
+    assert "completion_truncated" in caplog.text
+    assert sdk.chat.completions.create.call_count == 1

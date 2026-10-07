@@ -11,7 +11,9 @@ Task 2A writes the following artifacts here after real teacher execution:
 
 No example datasets are prefilled. Unit-test fixtures are never exported here.
 The notebook saves raw responses after each batch so an interruption preserves
-completed responses. A partial raw run is not silently overwritten or passed off
-as a complete dataset. Use a new run directory if regenerating; retain the old raw
-file for audit. Existing splits are protected from overwrite. Once split, keep
+completed responses. Resume revalidates that journal and appends only missing-ID
+requests. Existing successes are never regenerated, old failures remain auditable,
+and raw bytes are preserved. A corrupt/incompatible journal fails before any API
+call or write. Keep both raw and clean files; do not delete a failed run to resume.
+Existing splits are protected from overwrite. Once split, keep
 `test.jsonl` untouched for Task 2C evaluation, including its manifest hash.

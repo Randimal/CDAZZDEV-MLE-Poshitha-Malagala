@@ -33,16 +33,21 @@ class PolicyExample(BaseModel):
 
 
 class GenerationConfig(BaseModel):
-    """160 candidates in sixteen batches by default; no model training."""
+    """160 candidates in batches of five by default; no model training."""
 
     model_config = ConfigDict(extra="forbid")
     candidate_count: int = Field(default=160, ge=120, le=1000)
-    batch_size: int = Field(default=10, ge=10, le=20)
-    minimum_clean: int = Field(default=120, ge=1)
+    batch_size: int = Field(default=5, ge=5, le=20)
+    minimum_clean: int = Field(default=120, ge=120)
+    target_clean: int = Field(default=130, ge=120)
     seed: int = 42
 
     @model_validator(mode="after")
     def check_size(self) -> "GenerationConfig":
         if self.minimum_clean > self.candidate_count:
             raise ValueError("minimum_clean cannot exceed candidate_count")
+        if not self.minimum_clean <= self.target_clean <= self.candidate_count:
+            raise ValueError(
+                "target_clean must be between minimum_clean and candidate_count"
+            )
         return self

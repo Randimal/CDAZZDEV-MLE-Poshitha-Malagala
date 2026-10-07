@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class TeacherError(RuntimeError):
     """Safe provider category; raw exceptions must not be logged."""
 
-    def __init__(self, category: str) -> None:
+    def __init__(self, category: str, *, raw_response: str | None = None) -> None:
         self.category = category
+        self.raw_response = raw_response
         super().__init__(f"Teacher request failed: {category}")
 
 
@@ -86,7 +87,7 @@ class GroqTeacherClient:
         model: str | None = None,
         sdk: Any = None,
         max_attempts: int = 3,
-        max_completion_tokens: int = 4500,
+        max_completion_tokens: int = 2500,
         min_interval_seconds: float = 0.0,
         max_retry_wait_seconds: float = 120.0,
         sleep: Callable[[float], None] = time.sleep,
@@ -110,15 +111,21 @@ class GroqTeacherClient:
         self._sleep = sleep
         self._clock = clock
         self._completed_at: float | None = None
+        self._rate_limit_until: float | None = None
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
         json_mode = True
         for attempt in range(1, self._attempts + 1):
+            now = self._clock()
+            quota_wait = max(0.0, (self._rate_limit_until or now) - now)
+            if quota_wait > self._max_wait:
+                raise TeacherError("rate_limit")
+            wait = quota_wait
             if self._completed_at is not None:
-                wait = self._interval - (self._clock() - self._completed_at)
-                if wait > 0:
-                    logger.info("Task 2 teacher quota pacing: waiting %.1fs", wait)
-                    self._sleep(wait)
+                wait = max(wait, self._interval - (now - self._completed_at))
+            if wait > 0:
+                logger.info("Task 2 teacher quota pacing: waiting %.1fs", wait)
+                self._sleep(wait)
             request: dict[str, Any] = {
                 "model": self.model,
                 "messages": [
@@ -138,6 +145,9 @@ class GroqTeacherClient:
                 content = response.choices[0].message.content
                 if not isinstance(content, str) or not content.strip():
                     raise TeacherError("empty_response")
+                if getattr(response.choices[0], "finish_reason", None) == "length":
+                    logger.warning("Task 2 provider category=completion_truncated")
+                    raise TeacherError("completion_truncated", raw_response=content)
                 return content
             except TeacherError:
                 self._completed_at = self._clock()
@@ -158,6 +168,8 @@ class GroqTeacherClient:
                 retry = attempt < self._attempts and (json_rejection or retryable)
                 if delay > self._max_wait:
                     retry = False
+                    if category == "rate_limit":
+                        self._rate_limit_until = self._completed_at + delay
                 logger.warning(
                     "Task 2 provider category=%s status=%s attempt=%s/%s retry=%s",
                     category,

@@ -68,11 +68,11 @@ def test_malformed_teacher_batch_rejected(response):
 def test_batched_generation_not_per_example():
     teacher = MockTeacher()
     result = generate_examples(teacher, GenerationConfig())
-    assert teacher.calls == 16
+    assert teacher.calls == 32
     assert len(result.examples) == 160
     assert not result.rejected
     assert result.failed_batches == 0
-    assert len(result.raw_records) == 16
+    assert len(result.raw_records) == 32
     assert all(
         record["response"] and record["system_prompt_sha256"]
         for record in result.raw_records
@@ -82,9 +82,9 @@ def test_batched_generation_not_per_example():
 def test_failed_batch_does_not_fabricate_examples():
     teacher = MockTeacher(fail_first=True)
     result = generate_examples(teacher, GenerationConfig())
-    assert len(result.examples) == 150
+    assert len(result.examples) == 155
     assert result.failed_batches == 1
-    assert result.missing_count == 10
+    assert result.missing_count == 5
     assert result.raw_records[0]["response"] is None
     missing_ids = {item["id"] for item in result.raw_records[0]["assignments"]}
     assert missing_ids.isdisjoint(example.id for example in result.examples)
@@ -99,7 +99,7 @@ def test_raw_checkpoint_and_overwrite_protection(tmp_path):
     assert records == result.raw_records
     assert records[0]["response"] is None
     assert records[0]["error_category"] == "rate_limit"
-    assert result.returned_count == 150
+    assert result.returned_count == 155
     with pytest.raises(FileExistsError):
         generate_examples(MockTeacher(), GenerationConfig(), raw_path=raw_path)
 
@@ -111,7 +111,7 @@ def test_all_failed_batches_produce_no_examples():
 
     result = generate_examples(FailedTeacher(), GenerationConfig())
     assert result.examples == []
-    assert result.failed_batches == 16
+    assert result.failed_batches == 32
     assert result.missing_count == 160
 
 
@@ -132,4 +132,4 @@ def test_mutated_policy_and_duplicate_id_rejected():
 
     result = generate_examples(MutatingTeacher(), GenerationConfig())
     reasons = Counter(item["reason"] for item in result.rejected)
-    assert reasons == {"assignment_mismatch": 16, "duplicate_id": 16}
+    assert reasons == {"assignment_mismatch": 32, "duplicate_id": 32}

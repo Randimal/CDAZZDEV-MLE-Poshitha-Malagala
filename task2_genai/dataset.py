@@ -141,7 +141,10 @@ def _sizes(total: int) -> list[int]:
 
 
 def split_examples(
-    examples: Sequence[PolicyExample], seed: int = SPLIT_SEED
+    examples: Sequence[PolicyExample],
+    seed: int = SPLIT_SEED,
+    *,
+    minimum_clean: int = 120,
 ) -> DatasetSplit:
     """Exact rounded 80/10/10 sizes, with feasible topic/risk stratification.
 
@@ -150,10 +153,8 @@ def split_examples(
     largest remainders; small datasets cannot represent all 42 topic/risk cells.
     Reject duplicate IDs/scenarios instead of allowing cross-split leakage.
     """
-    if len(examples) < 10:
-        raise ValueError(
-            "At least ten examples are needed for nonempty 80/10/10 splits"
-        )
+    if minimum_clean < 120 or len(examples) < minimum_clean:
+        raise ValueError("At least 120 clean examples are required before splitting")
     ids = [example.id for example in examples]
     scenarios = [normalize_scenario(example.scenario) for example in examples]
     if len(set(ids)) != len(ids) or len(set(scenarios)) != len(scenarios):

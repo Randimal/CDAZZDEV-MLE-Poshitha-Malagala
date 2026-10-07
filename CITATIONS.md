@@ -166,3 +166,22 @@ Model/tool attribution:
 All AI-generated code must be reviewed, tested and understood by the candidate
 before submission. This entry attributes AI-assisted implementation; it does not
 claim the candidate personally authored generated code or provide legal advice.
+
+## Task 2A checkpoint-resume reliability
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose: replay/validate existing raw checkpoints; request only missing assignment
+IDs; preserve prior valid examples and append-only audit history; reduce free-tier
+batches/token budgets; bounded pacing/Retry-After and explicit truncation handling;
+hard clean-size split guard; focused mocked regressions and notebook/documentation.
+
+Prompt: Fix Task 2A live teacher reliability only. Retain the twenty previously
+validated examples, resume the same 160-ID plan without regenerating accepted IDs,
+use five-example batches around 2,500 tokens and 65-second pacing, aim for 130+
+clean examples with a hard 120 minimum, and preserve deterministic leakage-free
+80/10/10 splits. Do not modify Tasks 1/3, train a student or fabricate examples.
+
+All AI-generated code must be reviewed, tested and understood by the candidate
+before submission. Dataset results still require actual teacher execution.
