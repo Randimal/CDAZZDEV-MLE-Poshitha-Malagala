@@ -32,7 +32,10 @@ class GroqClient:
     TLS verification remains the SDK default (enabled).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_completion_tokens: int = 700) -> None:
+        if not 1 <= max_completion_tokens <= 4096:
+            raise ValueError("Completion token limit must be between 1 and 4096")
+        self.max_completion_tokens = max_completion_tokens
         key = os.environ.get("GROQ_API_KEY", "").strip()
         self.model = os.environ.get("GROQ_MODEL", "").strip()
         if not key or not self.model:
@@ -48,7 +51,7 @@ class GroqClient:
             ],
             response_format={"type": "json_object"},
             temperature=0,
-            max_completion_tokens=700,
+            max_completion_tokens=self.max_completion_tokens,
         )
         content = response.choices[0].message.content
         if not isinstance(content, str):

@@ -8,7 +8,7 @@ Senior Machine Learning Engineer assessment for CDAZZDEV. Task 1 includes a conf
 | Task 1B — LLM sentiment and recommendation | Implemented |
 | Task 1 bonus — Research brief | Implemented |
 | Task 2 | Pending |
-| Task 3 | Pending |
+| Task 3 — Agentic workflows | Implemented |
 
 ## Architecture
 
@@ -29,7 +29,7 @@ task1_financial/
   tests/                       deterministic pytest suite
   task1_financial.ipynb         executable local/Colab demonstration
 task2_genai/README.md           placeholder
-task3_agentic/README.md         placeholder
+task3_agentic/                  LangGraph agents, tools, typed handoffs, memory and tracing
 ```
 
 ## Installation
@@ -57,6 +57,8 @@ Phase 1 validation (2026-10-06): 27 offline tests passed on Python 3.12. Import 
 
 Phase 2 validation (2026-10-07): all 73 offline tests passed, including the original 27. Import/compile, Python 3.11 syntax, notebook schema/cell syntax, Ruff lint/format and Git whitespace checks passed. Yahoo NVDA smoke still failed TLS certificate verification; Groq smoke was skipped because its key/model configuration was unavailable. No live report artifacts were generated. Report generation was verified using temporary test fixtures only, with no prepopulated notebook outputs.
 
+Phase 3 validation (2026-10-07): all 105 tests passed, including the original 73. Real LangGraph execution with mocked providers demonstrated different tool orders, observe/replan recovery, the mandatory critique, follow-ups without data calls and zero-call persistent cache hits. Import/compile, Python 3.11 syntax, both notebook schemas/cell syntax, lint/format and whitespace checks passed. Live DuckDuckGo search returned five results; Yahoo still failed TLS certificate verification. Groq/agent live smoke was skipped because key/model settings were unavailable. Two actual tool-smoke records were written to the ignored Task 3 JSONL trace; no live agent report or notebook results were fabricated.
+
 ## Running the notebook
 
 Run `jupyter notebook task1_financial/task1_financial.ipynb` from the root. In Colab, open the notebook from your public GitHub repository. In the setup cell, paste your actual repository URL if it cannot locate an existing checkout; the cell clones into the current runtime directory and installs `requirements.txt`. Run all cells in order. NVDA and a dynamic `2y` period are defaults. Outputs are deliberately unexecuted in the committed notebook.
@@ -66,6 +68,14 @@ For Task 1B, set `GROQ_API_KEY` and `GROQ_MODEL` in the runtime environment or C
 Reports generated from actual pipeline results are saved under `task1_financial/outputs/` (ignored by Git). Download the HTML together with its PNG for the relative chart link. If Yahoo data is unavailable no report is generated; unavailable LLM analysis is explicitly marked rather than replaced with invented sentiment or a recommendation.
 
 See [Task 1 documentation](task1_financial/README.md) for formulas and limitations. Review [AI citations](CITATIONS.md) before submission. Reflection headings are intentionally left for the candidate.
+
+## Task 3: agentic research
+
+Open `jupyter notebook task3_agentic/task3_agentic.ipynb` locally or load it from GitHub in Colab. Configure the same Groq environment/Colab Secrets variables. Task 3 uses LangGraph `StateGraph` with validated JSON decisions through the existing Groq adapter. Free search uses DDGS with its DuckDuckGo backend, without a search API key.
+
+The single agent chooses among five tools. The two-agent graph restricts Agent A to price/volatility/sentiment and Agent B to news/search, with a mandatory typed brief → review → clarification → report path. Tool order within stages is selected by the LLM from observations, including failures. Reports contain financial-health and sentiment summaries, exactly three evidence-linked 90-day risks and one quantitatively supported hedge concept.
+
+The notebook exposes sanitized messages/decisions/observations/handoffs, a follow-up without data-tool calls, and a saved first run followed by a new-session cache hit. Reports are cached in `task3_agentic/memory/TICKER_UTC-DATE.json` with separate single/multi slots. Tools append to `task3_agentic/logs/agent_trace.jsonl`. Both directories are ignored. `use_cache=False` reruns the graph and clears session snapshots. See [Task 3 documentation](task3_agentic/README.md) for validation steps and limitations. Task 2 remains unimplemented.
 
 ## Security and secrets
 

@@ -47,3 +47,26 @@ All AI-generated code must be reviewed, tested and understood by the candidate b
 References:
 - [Groq structured outputs](https://console.groq.com/docs/structured-outputs): JSON object mode and the need for application schema validation.
 - [Groq chat API](https://console.groq.com/docs/api-reference): chat messages, model selection and JSON response format.
+
+## Phase 3 implementation
+
+AI-ASSISTED: OpenAI Codex
+Date: 2026-10-07
+
+Purpose:
+- LangGraph single research agent and autonomous tool routing
+- restricted analyst/writer agents and structured handoffs
+- mandatory critique request/response loop
+- Task 1 price/news/sentiment/Groq reuse and historical volatility
+- free web search integration
+- session follow-ups, persistent JSON cache and redacted tool observability
+- mocked tests, Colab notebook and documentation
+
+Prompt:
+Implement only Task 3 of the existing CDAZZDEV assessment. Use LangGraph and reuse Task 1 services. Provide price, news, annualized historical volatility, structured LLM sentiment and free search tools; let the model choose tools based on state/observations rather than a fixed sequence. Produce a validated financial-health/sentiment report with three evidence-supported 90-day risks and one data-driven hedge concept. Enforce analyst and writer tool restrictions, pass a structured quantitative brief, execute one specific critique request and analyst clarification, and require the writer to incorporate the response. Demonstrate state-only follow-ups and ticker/date persistent caching, log every tool invocation with redaction/truncated output/timing/success, add offline mocked tests and an executable notebook with visible traces, update documentation and preserve earlier citations. Leave Task 2 and personal reflection content untouched; never weaken TLS verification or fabricate notebook results.
+
+All AI-generated code must be reviewed, tested and understood by the candidate before submission. Generated implementation assistance is attributed to AI, not represented as the candidate's independent authorship.
+
+References:
+- [LangGraph StateGraph API](https://reference.langchain.com/python/langgraph/graph/state/StateGraph): typed state, nodes and conditional routing.
+- [DDGS package/API](https://pypi.org/project/ddgs/): free structured search with the DuckDuckGo backend.

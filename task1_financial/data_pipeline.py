@@ -116,6 +116,7 @@ def run_pipeline(
     config: PipelineConfig | None = None,
     *,
     client: Any = None,
+    include_news: bool = True,
 ) -> PipelineResult:
     """Fetch daily adjusted prices; essential failures raise PipelineError.
 
@@ -149,5 +150,9 @@ def run_pipeline(
         metadata = {}
     summary = build_summary(ticker, data, metadata, momentum)
     return PipelineResult(
-        ticker, data, fetch_news(client, config.news_count), summary, momentum
+        ticker,
+        data,
+        fetch_news(client, config.news_count) if include_news else [],
+        summary,
+        momentum,
     )

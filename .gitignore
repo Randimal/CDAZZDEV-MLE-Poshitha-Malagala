@@ -10,3 +10,6 @@ __pycache__/
 .uv-cache/
 *.log
 task1_financial/outputs/
+task3_agentic/memory/
+task3_agentic/logs/*
+!task3_agentic/logs/agent_trace.jsonl

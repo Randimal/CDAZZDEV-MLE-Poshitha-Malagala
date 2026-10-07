@@ -6,3 +6,5 @@ pytest>=8,<10
 jupyter>=1,<2
 groq>=0.30,<2
 pydantic>=2.7,<3
+langgraph>=1,<2
+ddgs>=9,<10

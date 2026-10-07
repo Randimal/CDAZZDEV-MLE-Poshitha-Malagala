@@ -2,9 +2,11 @@
 
 ## Objective and architecture
 
-Fetch at least two years of daily OHLCV for a configurable ticker (NVDA by default), compute technical indicators ourselves, normalize recent news and return a price-derived summary with deterministic momentum. Task 1B adds validated Groq headline sentiment and technical recommendation; the bonus produces a compact research brief. Tasks 2 and 3 remain pending.
+Fetch at least two years of daily OHLCV for a configurable ticker (NVDA by default), compute technical indicators ourselves, normalize recent news and return a price-derived summary with deterministic momentum. Task 1B adds validated Groq headline sentiment and technical recommendation; the bonus produces a compact research brief. Task 2 remains pending; [Task 3](../task3_agentic/README.md) reuses these services in agentic workflows.
 
 `shared/config.py` holds immutable configuration and named indicator constants. `data_pipeline.py` orchestrates provider calls and validates history. `indicators.py`, `news.py` and `momentum.py` contain independent transformations. Dataclasses describe the result and news records; domain exceptions distinguish essential data failures. Tests inject a mocked client instead of contacting Yahoo.
+
+Task 3 adds two optional, backward-compatible entry-point settings: `run_pipeline(include_news=False)` omits news for its restricted price tool, and `GroqClient(max_completion_tokens=1800)` permits report-sized output. Existing defaults remain news enabled and 700 completion tokens; indicator formulas and summary behavior are unchanged.
 
 ## Indicator formulas
 
