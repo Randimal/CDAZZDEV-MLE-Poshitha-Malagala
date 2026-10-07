@@ -40,6 +40,14 @@ model confidence as a calibrated probability or news as complete coverage.
 Use cautious reasoning and mention material uncertainty. End each sentence
 with punctuation; avoid abbreviations so sentence validation is reliable."""
 
+RECOMMENDATION_REPAIR = """
+The previous output was rejected: {feedback}
+Return a fresh JSON object with exactly signal and reasoning. Use BUY, HOLD or
+SELL for signal and a string of 3–5 complete sentences for reasoning (at most
+900 characters). No markdown, commentary or extra fields. Reconsider the same
+supplied evidence; preserve all factual constraints. Do not substitute a default
+decision or invent evidence to satisfy validation."""
+
 
 def sentiment_user(ticker: str, headline: str) -> str:
     return "Analyze this JSON data:\n" + json_payload(

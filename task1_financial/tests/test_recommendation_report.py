@@ -1,13 +1,16 @@
 import json
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+import httpx
 import numpy as np
 import pandas as pd
 import pytest
+from groq import APIStatusError
 
 from task1_financial.indicators import add_indicators
 from task1_financial.json_utils import json_payload, json_safe
+from task1_financial.llm import GroqClient, LLMTransportError
 from task1_financial.llm_models import TechnicalRecommendation
 from task1_financial.models import MomentumResult, NewsHeadline, PipelineResult
 from task1_financial.prompts import RECOMMENDATION_SYSTEM
@@ -95,6 +98,131 @@ def test_recommendation_payload_and_retry(pipeline_result: PipelineResult) -> No
     assert json.loads(sent)["indicators"]["RSI"] is None
     assert json.loads(sent)["technical_facts"] == payload["technical_facts"]
     assert "NaN" not in sent
+
+
+@pytest.fixture
+def recommendation_client(monkeypatch: pytest.MonkeyPatch) -> GroqClient:
+    monkeypatch.setenv("GROQ_API_KEY", "test-only-placeholder")
+    monkeypatch.setenv("GROQ_MODEL", "test-model")
+    with patch("task1_financial.llm.Groq"):
+        return GroqClient()
+
+
+def test_recommendation_provider_json_object_accepted(
+    pipeline_result: PipelineResult, recommendation_client: GroqClient
+) -> None:
+    create = recommendation_client._client.chat.completions.create
+    create.return_value.choices = [
+        Mock(
+            message=Mock(content=json.dumps({"signal": "BUY", "reasoning": REASONING}))
+        )
+    ]
+    result = get_recommendation(pipeline_result, recommendation_client)
+    assert isinstance(result, TechnicalRecommendation) and result.signal == "BUY"
+    assert create.call_count == 1
+    assert create.call_args.kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.parametrize(
+    ("output", "category", "feedback"),
+    [
+        ("{not JSON", "json_parse", "invalid JSON syntax"),
+        (
+            json.dumps({"signal": "BULLISH", "reasoning": REASONING}),
+            "schema_validation",
+            "signal is required and must be BUY, HOLD or SELL",
+        ),
+        (
+            json.dumps({"signal": "BUY", "reasoning": "Only one sentence."}),
+            "schema_validation",
+            "3–5 complete punctuated sentences",
+        ),
+    ],
+)
+def test_recommendation_one_targeted_repair(
+    pipeline_result: PipelineResult,
+    output: str,
+    category: str,
+    feedback: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = Mock()
+    client.complete.side_effect = [
+        output,
+        json.dumps({"signal": "SELL", "reasoning": REASONING}),
+    ]
+    result = get_recommendation(pipeline_result, client)
+    assert result.signal == "SELL" and client.complete.call_count == 2
+    first, repair = client.complete.call_args_list
+    assert feedback in repair.args[0]
+    assert RECOMMENDATION_SYSTEM in repair.args[0]
+    assert first.args[1] == repair.args[1]  # Evidence is preserved, not invented.
+    assert f"category={category}" in caplog.text
+
+
+def test_recommendation_failed_repair_never_fabricates_signal(
+    pipeline_result: PipelineResult, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = Mock()
+    client.complete.return_value = "secret-invalid-output"
+    assert get_recommendation(pipeline_result, client) is None
+    assert client.complete.call_count == 2
+    assert "secret-invalid-output" not in caplog.text
+    with pytest.raises(ValueError, match="between 1 and 2"):
+        get_recommendation(pipeline_result, client, attempts=3)
+
+
+@pytest.mark.parametrize("repair_succeeds", [True, False])
+def test_provider_json_rejection_uses_one_locally_validated_text_repair(
+    pipeline_result: PipelineResult,
+    recommendation_client: GroqClient,
+    repair_succeeds: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    error = APIStatusError(
+        "private provider message",
+        response=httpx.Response(
+            400, request=httpx.Request("POST", "https://api.groq.com")
+        ),
+        body={"error": {"code": "json_validate_failed", "failed_generation": "secret"}},
+    )
+    repair = Mock()
+    repair.choices = [
+        Mock(
+            message=Mock(
+                content=json.dumps(
+                    {
+                        "signal": "HOLD" if repair_succeeds else "BULLISH",
+                        "reasoning": REASONING,
+                    }
+                )
+            )
+        )
+    ]
+    create = recommendation_client._client.chat.completions.create
+    create.side_effect = [error, repair]
+    with patch("task1_financial.llm.time.sleep") as sleep:
+        result = get_recommendation(pipeline_result, recommendation_client)
+    assert (result.signal == "HOLD") if repair_succeeds else result is None
+    assert create.call_count == 2
+    assert [call.kwargs["response_format"] for call in create.call_args_list] == [
+        {"type": "json_object"},
+        {"type": "text"},
+    ]
+    repair_system = create.call_args.kwargs["messages"][0]["content"]
+    assert "provider could not generate valid JSON syntax" in repair_system
+    assert RECOMMENDATION_SYSTEM in repair_system
+    sleep.assert_not_called()
+    assert "private provider message" not in caplog.text and "secret" not in caplog.text
+
+
+def test_recommendation_transport_failure_is_not_output_repair(
+    pipeline_result: PipelineResult,
+) -> None:
+    client = Mock()
+    client.complete.side_effect = LLMTransportError("rate_limit", status_code=429)
+    assert get_recommendation(pipeline_result, client) is None
+    assert client.complete.call_count == 1
 
 
 @pytest.mark.parametrize("pe", [None, 35.2])

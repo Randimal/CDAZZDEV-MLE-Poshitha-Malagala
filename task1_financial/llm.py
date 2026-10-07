@@ -139,8 +139,11 @@ class GroqClient:
             raise LLMConfigurationError("Set GROQ_API_KEY and GROQ_MODEL")
         self._client = Groq(api_key=key, timeout=DEFAULT_TIMEOUT_SECONDS, max_retries=0)
 
-    def complete(self, system: str, user: str) -> str:
-        """Retry transient transport errors internally; deterministic errors stop."""
+    def complete(self, system: str, user: str, *, json_mode: bool = True) -> str:
+        """Retry transport errors; optionally return text for local JSON validation.
+
+        JSON-object mode remains the default for all existing callers.
+        """
         for attempt in range(TRANSPORT_ATTEMPTS):
             try:
                 response = self._client.chat.completions.create(
@@ -149,7 +152,7 @@ class GroqClient:
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
-                    response_format={"type": "json_object"},
+                    response_format={"type": "json_object" if json_mode else "text"},
                     temperature=0,
                     max_completion_tokens=self.max_completion_tokens,
                 )
