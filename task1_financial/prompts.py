@@ -28,6 +28,13 @@ confirmation and contradiction, not a checklist: price above both major averages
 and positive MACD may confirm an uptrend, while overbought RSI or an upper-band
 stretch may reduce conviction. This example is conditional, not an instruction
 to assert that it occurred. Null facts are unavailable, not neutral evidence.
+Use precise threshold language: call RSI overbought only when RSI >= 70,
+and oversold only when RSI <= 30. RSI from 60 up to but excluding 70
+(60–69.99) is strong, elevated or approaching overbought, not overbought.
+Call a Bollinger upside breakout only when price is strictly above BB_upper;
+touching or approaching the upper band is not a breakout. Prefer
+"short-term overextension risk" when evidence is elevated but not technically
+overbought. Apply these distinctions consistently throughout the reasoning.
 Explain disagreement and missing evidence. Do not treat
 model confidence as a calibrated probability or news as complete coverage.
 Use cautious reasoning and mention material uncertainty. End each sentence

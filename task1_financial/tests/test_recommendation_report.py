@@ -10,10 +10,23 @@ from task1_financial.indicators import add_indicators
 from task1_financial.json_utils import json_payload, json_safe
 from task1_financial.llm_models import TechnicalRecommendation
 from task1_financial.models import MomentumResult, NewsHeadline, PipelineResult
+from task1_financial.prompts import RECOMMENDATION_SYSTEM
 from task1_financial.recommendation import get_recommendation, recommendation_payload
 from task1_financial.report import generate_report
 from task1_financial.sentiment import aggregate_sentiment
 from task1_financial.tests.test_llm import REASONING
+
+
+def test_recommendation_prompt_precise_threshold_language() -> None:
+    assert "overbought only when RSI >= 70" in RECOMMENDATION_SYSTEM
+    assert "oversold only when RSI <= 30" in RECOMMENDATION_SYSTEM
+    assert "60 up to but excluding 70" in RECOMMENDATION_SYSTEM
+    assert "approaching overbought, not overbought" in RECOMMENDATION_SYSTEM
+    assert "price is strictly above BB_upper" in RECOMMENDATION_SYSTEM
+    assert "touching or approaching the upper band is not a breakout" in (
+        RECOMMENDATION_SYSTEM
+    )
+    assert "short-term overextension risk" in RECOMMENDATION_SYSTEM
 
 
 @pytest.fixture
